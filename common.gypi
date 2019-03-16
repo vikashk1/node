@@ -59,7 +59,7 @@
     'v8_enable_disassembler': 1,
 
     # https://github.com/nodejs/node/pull/22920/files#r222779926
-    'v8_enable_handle_zapping': 0,
+    'v8_enable_handle_zapping': 1,
 
     # Disable V8 untrusted code mitigations.
     # See https://github.com/v8/v8/wiki/Untrusted-code-mitigations
@@ -168,7 +168,7 @@
       },
       'Release': {
         'variables': {
-          'v8_enable_handle_zapping': 0,
+          'v8_enable_handle_zapping': 1,
           'pgo_generate': ' -fprofile-generate ',
           'pgo_use': ' -fprofile-use -fprofile-correction ',
           'lto': ' -flto=4 -fuse-linker-plugin -ffat-lto-objects ',
