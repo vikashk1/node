@@ -1110,7 +1110,7 @@ This can be called many times with new data as it is streamed.
 <!-- YAML
 added: v11.6.0
 changes:
-  - version: REPLACEME
+  - version: v12.0.0
     pr-url: https://github.com/nodejs/node/pull/26438
     description: This class is now exported.
 -->
@@ -1129,7 +1129,7 @@ passing keys as strings or `Buffer`s due to improved security features.
 <!-- YAML
 added: v11.6.0
 changes:
-  - version: REPLACEME
+  - version: v12.0.0
     pr-url: https://github.com/nodejs/node/pull/26319
     description: Added support for `'ed25519'` and `'ed448'`
 -->
@@ -1822,7 +1822,7 @@ must be an object with the properties described above.
 <!-- YAML
 added: v11.6.0
 changes:
-  - version: REPLACEME
+  - version: v12.0.0
     pr-url: https://github.com/nodejs/node/pull/26278
     description: The `key` argument can now be a `KeyObject` with type
                  `private`.
@@ -1903,7 +1903,7 @@ algorithm names.
 <!-- YAML
 added: v10.12.0
 changes:
-  - version: REPLACEME
+  - version: v12.0.0
     pr-url: https://github.com/nodejs/node/pull/26554
     description: Add ability to generate Ed25519 and Ed448 key pairs.
   - version: v11.6.0
@@ -1963,7 +1963,7 @@ a `Promise` for an `Object` with `publicKey` and `privateKey` properties.
 <!-- YAML
 added: v10.12.0
 changes:
-  - version: REPLACEME
+  - version: v12.0.0
     pr-url: https://github.com/nodejs/node/pull/26554
     description: Add ability to generate Ed25519 and Ed448 key pairs.
   - version: v11.6.0
