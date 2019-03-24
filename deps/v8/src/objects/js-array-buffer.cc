@@ -69,11 +69,7 @@ void JSArrayBuffer::FreeBackingStore(Isolate* isolate, Allocation allocation) {
   if (allocation.is_wasm_memory) {
     wasm::WasmMemoryTracker* memory_tracker =
         isolate->wasm_engine()->memory_tracker();
-    if (!memory_tracker->FreeMemoryIfIsWasmMemory(isolate,
-                                                  allocation.backing_store)) {
-      CHECK(FreePages(GetPlatformPageAllocator(), allocation.allocation_base,
-                      allocation.length));
-    }
+    memory_tracker->FreeMemoryIfIsWasmMemory(isolate, allocation.backing_store);
   } else {
     isolate->array_buffer_allocator()->Free(allocation.allocation_base,
                                             allocation.length);
@@ -210,7 +206,7 @@ Maybe<bool> JSTypedArray::DefineOwnProperty(Isolate* isolate,
                                             Handle<JSTypedArray> o,
                                             Handle<Object> key,
                                             PropertyDescriptor* desc,
-                                            ShouldThrow should_throw) {
+                                            Maybe<ShouldThrow> should_throw) {
   // 1. Assert: IsPropertyKey(P) is true.
   DCHECK(key->IsName() || key->IsNumber());
   // 2. Assert: O is an Object that has a [[ViewedArrayBuffer]] internal slot.
@@ -226,19 +222,19 @@ Maybe<bool> JSTypedArray::DefineOwnProperty(Isolate* isolate,
       // FIXME: the standard allows up to 2^53 elements.
       uint32_t index;
       if (numeric_index->IsMinusZero() || !numeric_index->ToUint32(&index)) {
-        RETURN_FAILURE(isolate, should_throw,
+        RETURN_FAILURE(isolate, GetShouldThrow(isolate, should_throw),
                        NewTypeError(MessageTemplate::kInvalidTypedArrayIndex));
       }
       // 3b iv. Let length be O.[[ArrayLength]].
       size_t length = o->length_value();
       // 3b v. If numericIndex ≥ length, return false.
       if (o->WasDetached() || index >= length) {
-        RETURN_FAILURE(isolate, should_throw,
+        RETURN_FAILURE(isolate, GetShouldThrow(isolate, should_throw),
                        NewTypeError(MessageTemplate::kInvalidTypedArrayIndex));
       }
       // 3b vi. If IsAccessorDescriptor(Desc) is true, return false.
       if (PropertyDescriptor::IsAccessorDescriptor(desc)) {
-        RETURN_FAILURE(isolate, should_throw,
+        RETURN_FAILURE(isolate, GetShouldThrow(isolate, should_throw),
                        NewTypeError(MessageTemplate::kRedefineDisallowed, key));
       }
       // 3b vii. If Desc has a [[Configurable]] field and if
@@ -250,7 +246,7 @@ Maybe<bool> JSTypedArray::DefineOwnProperty(Isolate* isolate,
       if ((desc->has_configurable() && desc->configurable()) ||
           (desc->has_enumerable() && !desc->enumerable()) ||
           (desc->has_writable() && !desc->writable())) {
-        RETURN_FAILURE(isolate, should_throw,
+        RETURN_FAILURE(isolate, GetShouldThrow(isolate, should_throw),
                        NewTypeError(MessageTemplate::kRedefineDisallowed, key));
       }
       // 3b x. If Desc has a [[Value]] field, then

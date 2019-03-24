@@ -241,8 +241,6 @@ void JSGenericLowering::LowerJSStoreNamed(Node* node) {
   Node* outer_state = frame_state->InputAt(kFrameStateOuterStateInput);
   node->InsertInput(zone(), 1, jsgraph()->HeapConstant(p.name()));
   if (!p.feedback().IsValid()) {
-    node->InsertInput(
-        zone(), 3, jsgraph()->SmiConstant(static_cast<int>(p.language_mode())));
     ReplaceWithRuntimeCall(node, Runtime::kSetNamedProperty);
     return;
   }
@@ -448,7 +446,7 @@ void JSGenericLowering::LowerJSCreateClosure(Node* node) {
   node->RemoveInput(4);  // control
 
   // Use the FastNewClosure builtin only for functions allocated in new space.
-  if (p.pretenure() == NOT_TENURED) {
+  if (p.allocation() == AllocationType::kYoung) {
     Callable callable =
         Builtins::CallableFor(isolate(), Builtins::kFastNewClosure);
     CallDescriptor::Flags flags = FrameStateFlagForCall(node);

@@ -86,6 +86,13 @@ void OptimizedCompilationInfo::ConfigureFlags() {
     default:
       break;
   }
+
+  if (FLAG_turbo_control_flow_aware_allocation) {
+    MarkAsTurboControlFlowAwareAllocation();
+  }
+  if (FLAG_turbo_preprocess_ranges) {
+    MarkAsTurboPreprocessRanges();
+  }
 }
 
 OptimizedCompilationInfo::~OptimizedCompilationInfo() {
@@ -201,6 +208,16 @@ void OptimizedCompilationInfo::SetTracingFlags(bool passes_filter) {
   if (FLAG_trace_turbo) SetFlag(kTraceTurboJson);
   if (FLAG_trace_turbo_graph) SetFlag(kTraceTurboGraph);
   if (FLAG_trace_turbo_scheduled) SetFlag(kTraceTurboScheduled);
+}
+
+OptimizedCompilationInfo::InlinedFunctionHolder::InlinedFunctionHolder(
+    Handle<SharedFunctionInfo> inlined_shared_info,
+    Handle<BytecodeArray> inlined_bytecode, SourcePosition pos)
+    : shared_info(inlined_shared_info), bytecode_array(inlined_bytecode) {
+  DCHECK_EQ(shared_info->GetBytecodeArray(), *bytecode_array);
+  position.position = pos;
+  // initialized when generating the deoptimization literals
+  position.inlined_function_id = DeoptimizationData::kNotInlinedIndex;
 }
 
 }  // namespace internal

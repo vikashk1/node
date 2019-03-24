@@ -176,10 +176,7 @@ class TerminatorThread : public v8::base::Thread {
   v8::Isolate* isolate_;
 };
 
-
-// Test that a single thread of JavaScript execution can be terminated
-// from the side by another thread.
-TEST(TerminateOnlyV8ThreadFromOtherThread) {
+void TestTerminatingSlowOperation(const char* source) {
   semaphore = new v8::base::Semaphore(0);
   TerminatorThread thread(CcTest::i_isolate());
   thread.Start();
@@ -191,40 +188,55 @@ TEST(TerminateOnlyV8ThreadFromOtherThread) {
       v8::Context::New(CcTest::isolate(), nullptr, global);
   v8::Context::Scope context_scope(context);
   CHECK(!CcTest::isolate()->IsExecutionTerminating());
-  // Run a loop that will be infinite if thread termination does not work.
   v8::MaybeLocal<v8::Value> result =
-      CompileRun(CcTest::isolate()->GetCurrentContext(),
-                 "try { loop(); fail(); } catch(e) { fail(); }");
+      CompileRun(CcTest::isolate()->GetCurrentContext(), source);
   CHECK(result.IsEmpty());
   thread.Join();
   delete semaphore;
   semaphore = nullptr;
 }
 
+// Test that a single thread of JavaScript execution can be terminated
+// from the side by another thread.
+TEST(TerminateOnlyV8ThreadFromOtherThread) {
+  // Run a loop that will be infinite if thread termination does not work.
+  TestTerminatingSlowOperation("try { loop(); fail(); } catch(e) { fail(); }");
+}
+
 // Test that execution can be terminated from within JSON.stringify.
 TEST(TerminateJsonStringify) {
-  semaphore = new v8::base::Semaphore(0);
-  TerminatorThread thread(CcTest::i_isolate());
-  thread.Start();
+  TestTerminatingSlowOperation(
+      "var x = [];"
+      "x[2**31]=1;"
+      "terminate();"
+      "JSON.stringify(x);"
+      "fail();");
+}
 
-  v8::HandleScope scope(CcTest::isolate());
-  v8::Local<v8::ObjectTemplate> global =
-      CreateGlobalTemplate(CcTest::isolate(), Signal, DoLoop);
-  v8::Local<v8::Context> context =
-      v8::Context::New(CcTest::isolate(), nullptr, global);
-  v8::Context::Scope context_scope(context);
-  CHECK(!CcTest::isolate()->IsExecutionTerminating());
-  v8::MaybeLocal<v8::Value> result =
-      CompileRun(CcTest::isolate()->GetCurrentContext(),
-                 "var x = [];"
-                 "x[2**31]=1;"
-                 "terminate();"
-                 "JSON.stringify(x);"
-                 "fail();");
-  CHECK(result.IsEmpty());
-  thread.Join();
-  delete semaphore;
-  semaphore = nullptr;
+TEST(TerminateBigIntMultiplication) {
+  TestTerminatingSlowOperation(
+      "terminate();"
+      "var a = 5n ** 555555n;"
+      "var b = 3n ** 3333333n;"
+      "a * b;"
+      "fail();");
+}
+
+TEST(TerminateBigIntDivision) {
+  TestTerminatingSlowOperation(
+      "var a = 2n ** 2222222n;"
+      "var b = 3n ** 333333n;"
+      "terminate();"
+      "a / b;"
+      "fail();");
+}
+
+TEST(TerminateBigIntToString) {
+  TestTerminatingSlowOperation(
+      "var a = 2n ** 2222222n;"
+      "terminate();"
+      "a.toString();"
+      "fail();");
 }
 
 int call_count = 0;
@@ -854,8 +866,6 @@ class TerminatorSleeperThread : public v8::base::Thread {
 };
 
 TEST(TerminateRegExp) {
-// regexp interpreter does not support preemption.
-#ifndef V8_INTERPRETED_REGEXP
   i::FLAG_allow_natives_syntax = true;
   v8::Isolate* isolate = CcTest::isolate();
   v8::HandleScope scope(isolate);
@@ -873,7 +883,6 @@ TEST(TerminateRegExp) {
             .IsEmpty());
   CHECK(try_catch.HasCaught());
   CHECK(isolate->IsExecutionTerminating());
-#endif  // V8_INTERPRETED_REGEXP
 }
 
 TEST(TerminateInMicrotask) {

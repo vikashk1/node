@@ -4,6 +4,7 @@
 
 #include "src/feedback-vector.h"
 #include "src/feedback-vector-inl.h"
+#include "src/ic/handler-configuration-inl.h"
 #include "src/ic/ic-inl.h"
 #include "src/objects.h"
 #include "src/objects/data-handler-inl.h"
@@ -78,7 +79,9 @@ Handle<FeedbackMetadata> FeedbackMetadata::New(Isolate* isolate,
   Factory* factory = isolate->factory();
 
   const int slot_count = spec == nullptr ? 0 : spec->slots();
-  if (slot_count == 0) {
+  const int closure_feedback_cell_count =
+      spec == nullptr ? 0 : spec->closure_feedback_cells();
+  if (slot_count == 0 && closure_feedback_cell_count == 0) {
     return factory->empty_feedback_metadata();
   }
 #ifdef DEBUG
@@ -94,7 +97,8 @@ Handle<FeedbackMetadata> FeedbackMetadata::New(Isolate* isolate,
   }
 #endif
 
-  Handle<FeedbackMetadata> metadata = factory->NewFeedbackMetadata(slot_count);
+  Handle<FeedbackMetadata> metadata =
+      factory->NewFeedbackMetadata(slot_count, closure_feedback_cell_count);
 
   // Initialize the slots. The raw data section has already been pre-zeroed in
   // NewFeedbackMetadata.
@@ -142,6 +146,8 @@ const char* FeedbackMetadata::Kind2String(FeedbackSlotKind kind) {
       return "LoadGlobalNotInsideTypeof";
     case FeedbackSlotKind::kLoadKeyed:
       return "LoadKeyed";
+    case FeedbackSlotKind::kHasKeyed:
+      return "HasKeyed";
     case FeedbackSlotKind::kStoreNamedSloppy:
       return "StoreNamedSloppy";
     case FeedbackSlotKind::kStoreNamedStrict:
@@ -164,8 +170,6 @@ const char* FeedbackMetadata::Kind2String(FeedbackSlotKind kind) {
       return "CompareOp";
     case FeedbackSlotKind::kStoreDataPropertyInLiteral:
       return "StoreDataPropertyInLiteral";
-    case FeedbackSlotKind::kCreateClosure:
-      return "kCreateClosure";
     case FeedbackSlotKind::kLiteral:
       return "Literal";
     case FeedbackSlotKind::kTypeProfile:
@@ -203,13 +207,15 @@ FeedbackSlot FeedbackVector::GetTypeProfileSlot() const {
 }
 
 // static
-Handle<FeedbackVector> FeedbackVector::New(Isolate* isolate,
-                                           Handle<SharedFunctionInfo> shared) {
+Handle<FeedbackVector> FeedbackVector::New(
+    Isolate* isolate, Handle<SharedFunctionInfo> shared,
+    Handle<FixedArray> closure_feedback_cell_array) {
   Factory* factory = isolate->factory();
 
   const int slot_count = shared->feedback_metadata()->slot_count();
 
-  Handle<FeedbackVector> vector = factory->NewFeedbackVector(shared, TENURED);
+  Handle<FeedbackVector> vector =
+      factory->NewFeedbackVector(shared, AllocationType::kOld);
 
   DCHECK_EQ(vector->length(), slot_count);
 
@@ -223,11 +229,12 @@ Handle<FeedbackVector> FeedbackVector::New(Isolate* isolate,
   DCHECK_EQ(vector->profiler_ticks(), 0);
   DCHECK_EQ(vector->deopt_count(), 0);
 
+  vector->set_closure_feedback_cell_array(*closure_feedback_cell_array);
+
   // Ensure we can skip the write barrier
   Handle<Object> uninitialized_sentinel = UninitializedSentinel(isolate);
   DCHECK_EQ(ReadOnlyRoots(isolate).uninitialized_symbol(),
             *uninitialized_sentinel);
-  Handle<Oddball> undefined_value = factory->undefined_value();
   for (int i = 0; i < slot_count;) {
     FeedbackSlot slot(i);
     FeedbackSlotKind kind = shared->feedback_metadata()->GetKind(slot);
@@ -248,11 +255,6 @@ Handle<FeedbackVector> FeedbackVector::New(Isolate* isolate,
       case FeedbackSlotKind::kBinaryOp:
         vector->set(index, Smi::kZero, SKIP_WRITE_BARRIER);
         break;
-      case FeedbackSlotKind::kCreateClosure: {
-        Handle<FeedbackCell> cell = factory->NewNoClosuresCell(undefined_value);
-        vector->set(index, *cell);
-        break;
-      }
       case FeedbackSlotKind::kLiteral:
         vector->set(index, Smi::kZero, SKIP_WRITE_BARRIER);
         break;
@@ -263,6 +265,7 @@ Handle<FeedbackVector> FeedbackVector::New(Isolate* isolate,
       case FeedbackSlotKind::kCloneObject:
       case FeedbackSlotKind::kLoadProperty:
       case FeedbackSlotKind::kLoadKeyed:
+      case FeedbackSlotKind::kHasKeyed:
       case FeedbackSlotKind::kStoreNamedSloppy:
       case FeedbackSlotKind::kStoreNamedStrict:
       case FeedbackSlotKind::kStoreOwnNamed:
@@ -292,6 +295,27 @@ Handle<FeedbackVector> FeedbackVector::New(Isolate* isolate,
     AddToVectorsForProfilingTools(isolate, result);
   }
   return result;
+}
+
+// static
+Handle<FixedArray> FeedbackVector::NewClosureFeedbackCellArray(
+    Isolate* isolate, Handle<SharedFunctionInfo> shared) {
+  Factory* factory = isolate->factory();
+
+  int num_feedback_cells =
+      shared->feedback_metadata()->closure_feedback_cell_count();
+  if (num_feedback_cells == 0) {
+    return factory->empty_fixed_array();
+  }
+
+  Handle<FixedArray> feedback_cell_array =
+      factory->NewFixedArray(num_feedback_cells, AllocationType::kOld);
+  for (int i = 0; i < num_feedback_cells; i++) {
+    Handle<FeedbackCell> cell =
+        factory->NewNoClosuresCell(factory->undefined_value());
+    feedback_cell_array->set(i, *cell);
+  }
+  return feedback_cell_array;
 }
 
 // static
@@ -443,6 +467,7 @@ void FeedbackNexus::ConfigureUninitialized() {
     case FeedbackSlotKind::kStoreOwnNamed:
     case FeedbackSlotKind::kLoadProperty:
     case FeedbackSlotKind::kLoadKeyed:
+    case FeedbackSlotKind::kHasKeyed:
     case FeedbackSlotKind::kStoreDataPropertyInLiteral: {
       SetFeedback(*FeedbackVector::UninitializedSentinel(isolate),
                   SKIP_WRITE_BARRIER);
@@ -459,7 +484,6 @@ bool FeedbackNexus::Clear() {
   bool feedback_updated = false;
 
   switch (kind()) {
-    case FeedbackSlotKind::kCreateClosure:
     case FeedbackSlotKind::kTypeProfile:
       // We don't clear these kinds ever.
       break;
@@ -483,6 +507,7 @@ bool FeedbackNexus::Clear() {
     case FeedbackSlotKind::kStoreOwnNamed:
     case FeedbackSlotKind::kLoadProperty:
     case FeedbackSlotKind::kLoadKeyed:
+    case FeedbackSlotKind::kHasKeyed:
     case FeedbackSlotKind::kStoreGlobalSloppy:
     case FeedbackSlotKind::kStoreGlobalStrict:
     case FeedbackSlotKind::kLoadGlobalNotInsideTypeof:
@@ -544,21 +569,18 @@ bool FeedbackNexus::ConfigureMegamorphic(IcCheckType property_type) {
   return changed;
 }
 
-Map FeedbackNexus::FindFirstMap() const {
+Map FeedbackNexus::GetFirstMap() const {
   MapHandles maps;
   ExtractMaps(&maps);
   if (maps.size() > 0) return *maps.at(0);
   return Map();
 }
 
-InlineCacheState FeedbackNexus::StateFromFeedback() const {
+InlineCacheState FeedbackNexus::ic_state() const {
   Isolate* isolate = GetIsolate();
   MaybeObject feedback = GetFeedback();
 
   switch (kind()) {
-    case FeedbackSlotKind::kCreateClosure:
-      return MONOMORPHIC;
-
     case FeedbackSlotKind::kLiteral:
       if (feedback->IsSmi()) return UNINITIALIZED;
       return MONOMORPHIC;
@@ -568,6 +590,13 @@ InlineCacheState FeedbackNexus::StateFromFeedback() const {
     case FeedbackSlotKind::kLoadGlobalNotInsideTypeof:
     case FeedbackSlotKind::kLoadGlobalInsideTypeof: {
       if (feedback->IsSmi()) return MONOMORPHIC;
+
+      if (feedback == MaybeObject::FromObject(
+                          *FeedbackVector::PremonomorphicSentinel(isolate))) {
+        DCHECK(kind() == FeedbackSlotKind::kStoreGlobalSloppy ||
+               kind() == FeedbackSlotKind::kStoreGlobalStrict);
+        return PREMONOMORPHIC;
+      }
 
       DCHECK(feedback->IsWeakOrCleared());
       MaybeObject extra = GetFeedbackExtra();
@@ -586,7 +615,8 @@ InlineCacheState FeedbackNexus::StateFromFeedback() const {
     case FeedbackSlotKind::kStoreInArrayLiteral:
     case FeedbackSlotKind::kStoreOwnNamed:
     case FeedbackSlotKind::kLoadProperty:
-    case FeedbackSlotKind::kLoadKeyed: {
+    case FeedbackSlotKind::kLoadKeyed:
+    case FeedbackSlotKind::kHasKeyed: {
       if (feedback == MaybeObject::FromObject(
                           *FeedbackVector::UninitializedSentinel(isolate))) {
         return UNINITIALIZED;
@@ -611,7 +641,8 @@ InlineCacheState FeedbackNexus::StateFromFeedback() const {
           return POLYMORPHIC;
         }
         if (heap_object->IsName()) {
-          DCHECK(IsKeyedLoadICKind(kind()) || IsKeyedStoreICKind(kind()));
+          DCHECK(IsKeyedLoadICKind(kind()) || IsKeyedStoreICKind(kind()) ||
+                 IsKeyedHasICKind(kind()));
           Object extra = GetFeedbackExtra()->GetHeapObjectAssumeStrong();
           WeakFixedArray extra_array = WeakFixedArray::cast(extra);
           return extra_array->length() > 2 ? POLYMORPHIC : MONOMORPHIC;
@@ -727,18 +758,21 @@ void FeedbackNexus::ConfigurePropertyCellMode(Handle<PropertyCell> cell) {
 }
 
 bool FeedbackNexus::ConfigureLexicalVarMode(int script_context_index,
-                                            int context_slot_index) {
+                                            int context_slot_index,
+                                            bool immutable) {
   DCHECK(IsGlobalICKind(kind()));
   DCHECK_LE(0, script_context_index);
   DCHECK_LE(0, context_slot_index);
   if (!ContextIndexBits::is_valid(script_context_index) ||
-      !SlotIndexBits::is_valid(context_slot_index)) {
+      !SlotIndexBits::is_valid(context_slot_index) ||
+      !ImmutabilityBit::is_valid(immutable)) {
     return false;
   }
   int config = ContextIndexBits::encode(script_context_index) |
-               SlotIndexBits::encode(context_slot_index);
+               SlotIndexBits::encode(context_slot_index) |
+               ImmutabilityBit::encode(immutable);
 
-  SetFeedback(Smi::FromInt(config));
+  SetFeedback(Smi::From31BitPattern(config));
   Isolate* isolate = GetIsolate();
   SetFeedbackExtra(*FeedbackVector::UninitializedSentinel(isolate),
                    SKIP_WRITE_BARRIER);
@@ -784,8 +818,8 @@ void FeedbackNexus::ConfigureCloneObject(Handle<Map> source_map,
       }
       break;
     case POLYMORPHIC: {
-      static constexpr int kMaxElements =
-          IC::kMaxPolymorphicMapCount * kCloneObjectPolymorphicEntrySize;
+      const int kMaxElements =
+          FLAG_max_polymorphic_map_count * kCloneObjectPolymorphicEntrySize;
       Handle<WeakFixedArray> array = Handle<WeakFixedArray>::cast(feedback);
       int i = 0;
       for (; i < array->length(); i += kCloneObjectPolymorphicEntrySize) {
@@ -915,7 +949,7 @@ int FeedbackNexus::ExtractMaps(MapHandles* maps) const {
   DCHECK(IsLoadICKind(kind()) || IsStoreICKind(kind()) ||
          IsKeyedLoadICKind(kind()) || IsKeyedStoreICKind(kind()) ||
          IsStoreOwnICKind(kind()) || IsStoreDataPropertyInLiteralKind(kind()) ||
-         IsStoreInArrayLiteralICKind(kind()));
+         IsStoreInArrayLiteralICKind(kind()) || IsKeyedHasICKind(kind()));
 
   Isolate* isolate = GetIsolate();
   MaybeObject feedback = GetFeedback();
@@ -963,7 +997,8 @@ int FeedbackNexus::ExtractMaps(MapHandles* maps) const {
 MaybeObjectHandle FeedbackNexus::FindHandlerForMap(Handle<Map> map) const {
   DCHECK(IsLoadICKind(kind()) || IsStoreICKind(kind()) ||
          IsKeyedLoadICKind(kind()) || IsKeyedStoreICKind(kind()) ||
-         IsStoreOwnICKind(kind()) || IsStoreDataPropertyInLiteralKind(kind()));
+         IsStoreOwnICKind(kind()) || IsStoreDataPropertyInLiteralKind(kind()) ||
+         IsKeyedHasICKind(kind()));
 
   MaybeObject feedback = GetFeedback();
   Isolate* isolate = GetIsolate();
@@ -1009,7 +1044,7 @@ bool FeedbackNexus::FindHandlers(MaybeObjectHandles* code_list,
   DCHECK(IsLoadICKind(kind()) || IsStoreICKind(kind()) ||
          IsKeyedLoadICKind(kind()) || IsKeyedStoreICKind(kind()) ||
          IsStoreOwnICKind(kind()) || IsStoreDataPropertyInLiteralKind(kind()) ||
-         IsStoreInArrayLiteralICKind(kind()));
+         IsStoreInArrayLiteralICKind(kind()) || IsKeyedHasICKind(kind()));
 
   MaybeObject feedback = GetFeedback();
   Isolate* isolate = GetIsolate();
@@ -1050,8 +1085,9 @@ bool FeedbackNexus::FindHandlers(MaybeObjectHandles* code_list,
   return count == length;
 }
 
-Name FeedbackNexus::FindFirstName() const {
-  if (IsKeyedStoreICKind(kind()) || IsKeyedLoadICKind(kind())) {
+Name FeedbackNexus::GetName() const {
+  if (IsKeyedStoreICKind(kind()) || IsKeyedLoadICKind(kind()) ||
+      IsKeyedHasICKind(kind())) {
     MaybeObject feedback = GetFeedback();
     if (IsPropertyNameFeedback(feedback)) {
       return Name::cast(feedback->GetHeapObjectAssumeStrong());
@@ -1061,7 +1097,7 @@ Name FeedbackNexus::FindFirstName() const {
 }
 
 KeyedAccessLoadMode FeedbackNexus::GetKeyedAccessLoadMode() const {
-  DCHECK(IsKeyedLoadICKind(kind()));
+  DCHECK(IsKeyedLoadICKind(kind()) || IsKeyedHasICKind(kind()));
   MapHandles maps;
   MaybeObjectHandles handlers;
 
@@ -1185,7 +1221,7 @@ KeyedAccessStoreMode FeedbackNexus::GetKeyedAccessStoreMode() const {
 
 IcCheckType FeedbackNexus::GetKeyType() const {
   DCHECK(IsKeyedStoreICKind(kind()) || IsKeyedLoadICKind(kind()) ||
-         IsStoreInArrayLiteralICKind(kind()));
+         IsStoreInArrayLiteralICKind(kind()) || IsKeyedHasICKind(kind()));
   MaybeObject feedback = GetFeedback();
   if (feedback == MaybeObject::FromObject(
                       *FeedbackVector::MegamorphicSentinel(GetIsolate()))) {
@@ -1211,12 +1247,6 @@ ForInHint FeedbackNexus::GetForInFeedback() const {
   DCHECK_EQ(kind(), FeedbackSlotKind::kForIn);
   int feedback = GetFeedback().ToSmi().value();
   return ForInHintFromFeedback(feedback);
-}
-
-Handle<FeedbackCell> FeedbackNexus::GetFeedbackCell() const {
-  DCHECK_EQ(FeedbackSlotKind::kCreateClosure, kind());
-  return handle(FeedbackCell::cast(GetFeedback()->cast<Object>()),
-                vector()->GetIsolate());
 }
 
 MaybeHandle<JSObject> FeedbackNexus::GetConstructorFeedback() const {

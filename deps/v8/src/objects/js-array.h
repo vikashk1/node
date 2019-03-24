@@ -55,14 +55,14 @@ class JSArray : public JSObject {
   // ES6 9.4.2.1
   V8_WARN_UNUSED_RESULT static Maybe<bool> DefineOwnProperty(
       Isolate* isolate, Handle<JSArray> o, Handle<Object> name,
-      PropertyDescriptor* desc, ShouldThrow should_throw);
+      PropertyDescriptor* desc, Maybe<ShouldThrow> should_throw);
 
   static bool AnythingToArrayLength(Isolate* isolate,
                                     Handle<Object> length_object,
                                     uint32_t* output);
   V8_WARN_UNUSED_RESULT static Maybe<bool> ArraySetLength(
       Isolate* isolate, Handle<JSArray> a, PropertyDescriptor* desc,
-      ShouldThrow should_throw);
+      Maybe<ShouldThrow> should_throw);
 
   // Support for Array.prototype.join().
   // Writes a fixed array of strings and separators to a single destination
@@ -105,8 +105,8 @@ class JSArray : public JSObject {
   // Number of element slots to pre-allocate for an empty array.
   static const int kPreallocatedArrayElements = 4;
 
-  DEFINE_FIELD_OFFSET_CONSTANTS(JSObject::kHeaderSize, JSARRAY_FIELDS)
-#undef JS_ARRAY_FIELDS
+  DEFINE_FIELD_OFFSET_CONSTANTS(JSObject::kHeaderSize,
+                                TORQUE_GENERATED_JSARRAY_FIELDS)
 
   static const int kLengthDescriptorIndex = 0;
 
@@ -174,16 +174,8 @@ class JSArrayIterator : public JSObject {
   inline IterationKind kind() const;
   inline void set_kind(IterationKind kind);
 
-  // Layout description.
-#define JS_ARRAY_ITERATOR_FIELDS(V)     \
-  V(kIteratedObjectOffset, kTaggedSize) \
-  V(kNextIndexOffset, kTaggedSize)      \
-  V(kKindOffset, kTaggedSize)           \
-  /* Header size. */                    \
-  V(kSize, 0)
-
-  DEFINE_FIELD_OFFSET_CONSTANTS(JSObject::kHeaderSize, JS_ARRAY_ITERATOR_FIELDS)
-#undef JS_ARRAY_ITERATOR_FIELDS
+  DEFINE_FIELD_OFFSET_CONSTANTS(JSObject::kHeaderSize,
+                                TORQUE_GENERATED_JSARRAY_ITERATOR_FIELDS)
 
   OBJECT_CONSTRUCTORS(JSArrayIterator, JSObject);
 };

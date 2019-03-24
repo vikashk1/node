@@ -16,6 +16,7 @@
 
 #include "include/v8-profiler.h"
 #include "src/allocation.h"
+#include "src/base/platform/time.h"
 #include "src/builtins/builtins.h"
 #include "src/code-events.h"
 #include "src/profiler/strings-storage.h"
@@ -64,7 +65,8 @@ class CodeEntry {
                    int line_number = v8::CpuProfileNode::kNoLineNumberInfo,
                    int column_number = v8::CpuProfileNode::kNoColumnNumberInfo,
                    std::unique_ptr<SourcePositionTable> line_info = nullptr,
-                   Address instruction_start = kNullAddress);
+                   Address instruction_start = kNullAddress,
+                   bool is_shared_cross_origin = false);
 
   const char* name() const { return name_; }
   const char* resource_name() const { return resource_name_; }
@@ -103,6 +105,10 @@ class CodeEntry {
   void SetBuiltinId(Builtins::Name id);
   Builtins::Name builtin_id() const {
     return BuiltinIdField::decode(bit_field_);
+  }
+
+  bool is_shared_cross_origin() const {
+    return SharedCrossOriginField::decode(bit_field_);
   }
 
   uint32_t GetHash() const;
@@ -196,8 +202,11 @@ class CodeEntry {
       kUnresolvedEntry;
 
   using TagField = BitField<CodeEventListener::LogEventsAndTags, 0, 8>;
-  using BuiltinIdField = BitField<Builtins::Name, 8, 23>;
-  using UsedField = BitField<bool, 31, 1>;
+  using BuiltinIdField = BitField<Builtins::Name, 8, 22>;
+  static_assert(Builtins::builtin_count <= BuiltinIdField::kNumValues,
+                "builtin_count exceeds size of bitfield");
+  using UsedField = BitField<bool, 30, 1>;
+  using SharedCrossOriginField = BitField<bool, 31, 1>;
 
   uint32_t bit_field_;
   const char* name_;
@@ -344,6 +353,12 @@ class CpuProfile {
  public:
   typedef v8::CpuProfilingMode ProfilingMode;
 
+  struct SampleInfo {
+    ProfileNode* node;
+    base::TimeTicks timestamp;
+    int line;
+  };
+
   CpuProfile(CpuProfiler* profiler, const char* title, bool record_samples,
              ProfilingMode mode);
 
@@ -356,10 +371,7 @@ class CpuProfile {
   const ProfileTree* top_down() const { return &top_down_; }
 
   int samples_count() const { return static_cast<int>(samples_.size()); }
-  ProfileNode* sample(int index) const { return samples_.at(index); }
-  base::TimeTicks sample_timestamp(int index) const {
-    return timestamps_.at(index);
-  }
+  const SampleInfo& sample(int index) const { return samples_[index]; }
 
   base::TimeTicks start_time() const { return start_time_; }
   base::TimeTicks end_time() const { return end_time_; }
@@ -377,8 +389,7 @@ class CpuProfile {
   ProfilingMode mode_;
   base::TimeTicks start_time_;
   base::TimeTicks end_time_;
-  std::vector<ProfileNode*> samples_;
-  std::vector<base::TimeTicks> timestamps_;
+  std::deque<SampleInfo> samples_;
   ProfileTree top_down_;
   CpuProfiler* const profiler_;
   size_t streaming_next_sample_;

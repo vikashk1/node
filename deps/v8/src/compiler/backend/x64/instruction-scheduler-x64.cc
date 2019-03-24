@@ -265,6 +265,12 @@ int InstructionScheduler::GetTargetInstructionFlags(
     case kX64S8x2Reverse:
     case kX64S1x16AnyTrue:
     case kX64S1x16AllTrue:
+    case kX64DecompressSigned:
+    case kX64DecompressPointer:
+    case kX64DecompressAny:
+    case kX64CompressSigned:
+    case kX64CompressPointer:
+    case kX64CompressAny:
       return (instr->addressing_mode() == kMode_None)
                  ? kNoOpcodeFlags
                  : kIsLoadOperation | kHasSideEffect;
@@ -306,6 +312,7 @@ int InstructionScheduler::GetTargetInstructionFlags(
     case kX64MovqDecompressTaggedSigned:
     case kX64MovqDecompressTaggedPointer:
     case kX64MovqDecompressAnyTagged:
+    case kX64MovqCompressTagged:
     case kX64Movq:
     case kX64Movsd:
     case kX64Movss:

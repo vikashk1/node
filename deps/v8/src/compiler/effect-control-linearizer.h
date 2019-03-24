@@ -36,7 +36,8 @@ class V8_EXPORT_PRIVATE EffectControlLinearizer {
   EffectControlLinearizer(JSGraph* graph, Schedule* schedule, Zone* temp_zone,
                           SourcePositionTable* source_positions,
                           NodeOriginTable* node_origins,
-                          MaskArrayIndexEnable mask_array_index);
+                          MaskArrayIndexEnable mask_array_index,
+                          std::vector<Handle<Map>>* embedded_maps);
 
   void Run();
 
@@ -63,6 +64,9 @@ class V8_EXPORT_PRIVATE EffectControlLinearizer {
   Node* LowerChangeTaggedToTaggedSigned(Node* node);
   Node* LowerPoisonIndex(Node* node);
   Node* LowerCheckInternalizedString(Node* node, Node* frame_state);
+  Node* LowerCheckNonEmptyOneByteString(Node* node, Node* frame_state);
+  Node* LowerCheckNonEmptyTwoByteString(Node* node, Node* frame_state);
+  Node* LowerCheckNonEmptyString(Node* node, Node* frame_state);
   void LowerCheckMaps(Node* node, Node* frame_state);
   Node* LowerCompareMaps(Node* node);
   Node* LowerCheckNumber(Node* node, Node* frame_state);
@@ -132,6 +136,8 @@ class V8_EXPORT_PRIVATE EffectControlLinearizer {
   Node* LowerNewDoubleElements(Node* node);
   Node* LowerNewSmiOrObjectElements(Node* node);
   Node* LowerNewArgumentsElements(Node* node);
+  Node* LowerNewConsOneByteString(Node* node);
+  Node* LowerNewConsTwoByteString(Node* node);
   Node* LowerNewConsString(Node* node);
   Node* LowerSameValue(Node* node);
   Node* LowerDeadValue(Node* node);
@@ -163,8 +169,11 @@ class V8_EXPORT_PRIVATE EffectControlLinearizer {
   Node* LowerMaybeGrowFastElements(Node* node, Node* frame_state);
   void LowerTransitionElementsKind(Node* node);
   Node* LowerLoadFieldByIndex(Node* node);
+  Node* LowerLoadMessage(Node* node);
   Node* LowerLoadTypedElement(Node* node);
   Node* LowerLoadDataViewElement(Node* node);
+  Node* LowerLoadStackArgument(Node* node);
+  void LowerStoreMessage(Node* node);
   void LowerStoreTypedElement(Node* node);
   void LowerStoreDataViewElement(Node* node);
   void LowerStoreSignedSmallElement(Node* node);
@@ -184,6 +193,7 @@ class V8_EXPORT_PRIVATE EffectControlLinearizer {
   Maybe<Node*> LowerFloat64RoundTruncate(Node* node);
 
   Node* AllocateHeapNumberWithValue(Node* node);
+  Node* AllocateConsString(Node* map, Node* length, Node* first, Node* second);
   Node* BuildCheckedFloat64ToInt32(CheckForMinusZeroMode mode,
                                    const VectorSlotPair& feedback, Node* value,
                                    Node* frame_state);
@@ -229,6 +239,7 @@ class V8_EXPORT_PRIVATE EffectControlLinearizer {
   CommonOperatorBuilder* common() const;
   SimplifiedOperatorBuilder* simplified() const;
   MachineOperatorBuilder* machine() const;
+  std::vector<Handle<Map>>* embedded_maps() { return embedded_maps_; }
 
   GraphAssembler* gasm() { return &graph_assembler_; }
 
@@ -241,6 +252,10 @@ class V8_EXPORT_PRIVATE EffectControlLinearizer {
   NodeOriginTable* node_origins_;
   GraphAssembler graph_assembler_;
   Node* frame_state_zapper_;  // For tracking down compiler::Node::New crashes.
+
+  // embedded_maps_ keeps track of maps we've embedded as Uint32 constants.
+  // We do this in order to notify the garbage collector at code-gen time.
+  std::vector<Handle<Map>>* embedded_maps_;
 };
 
 }  // namespace compiler

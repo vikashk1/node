@@ -28,9 +28,10 @@ namespace internal {
   V(ArraySingleArgumentConstructor)   \
   V(AsyncFunctionStackParameter)      \
   V(BigIntToI64)                      \
-  V(BigIntToWasmI64)                  \
+  V(I64ToBigInt)                      \
   V(BinaryOp)                         \
   V(CallForwardVarargs)               \
+  V(CallFunctionTemplate)             \
   V(CallTrampoline)                   \
   V(CallVarargs)                      \
   V(CallWithArrayLike)                \
@@ -77,10 +78,12 @@ namespace internal {
   V(TypeConversionStackParameter)     \
   V(Typeof)                           \
   V(Void)                             \
-  V(WasmAtomicWake)                   \
+  V(WasmAtomicNotify)                 \
   V(WasmI32AtomicWait)                \
   V(WasmI64AtomicWait)                \
   V(WasmMemoryGrow)                   \
+  V(WasmTableGet)                     \
+  V(WasmTableSet)                     \
   V(WasmThrow)                        \
   BUILTIN_LIST_TFS(V)
 
@@ -793,6 +796,14 @@ class CallForwardVarargsDescriptor : public CallInterfaceDescriptor {
   DECLARE_DESCRIPTOR(CallForwardVarargsDescriptor, CallInterfaceDescriptor)
 };
 
+class CallFunctionTemplateDescriptor : public CallInterfaceDescriptor {
+ public:
+  DEFINE_PARAMETERS(kFunctionTemplateInfo, kArgumentsCount)
+  DEFINE_PARAMETER_TYPES(MachineType::AnyTagged(),  // kFunctionTemplateInfo
+                         MachineType::IntPtr())     // kArgumentsCount
+  DECLARE_DESCRIPTOR(CallFunctionTemplateDescriptor, CallInterfaceDescriptor)
+};
+
 class CallWithSpreadDescriptor : public CallInterfaceDescriptor {
  public:
   DEFINE_PARAMETERS(kTarget, kArgumentsCount, kSpread)
@@ -847,7 +858,7 @@ class ConstructStubDescriptor : public CallInterfaceDescriptor {
  public:
   // TODO(jgruber): Remove the unused allocation site parameter.
   DEFINE_JS_PARAMETERS(kAllocationSite)
-  DEFINE_JS_PARAMETER_TYPES(MachineType::AnyTagged());
+  DEFINE_JS_PARAMETER_TYPES(MachineType::AnyTagged())
 
   // TODO(ishell): Use DECLARE_JS_COMPATIBLE_DESCRIPTOR if registers match
   DECLARE_DESCRIPTOR(ConstructStubDescriptor, CallInterfaceDescriptor)
@@ -870,7 +881,7 @@ class AllocateHeapNumberDescriptor : public CallInterfaceDescriptor {
 class ArrayConstructorDescriptor : public CallInterfaceDescriptor {
  public:
   DEFINE_JS_PARAMETERS(kAllocationSite)
-  DEFINE_JS_PARAMETER_TYPES(MachineType::AnyTagged());
+  DEFINE_JS_PARAMETER_TYPES(MachineType::AnyTagged())
 
   DECLARE_JS_COMPATIBLE_DESCRIPTOR(ArrayConstructorDescriptor,
                                    CallInterfaceDescriptor, 1)
@@ -993,16 +1004,12 @@ class CEntry1ArgvOnStackDescriptor : public CallInterfaceDescriptor {
 
 class ApiCallbackDescriptor : public CallInterfaceDescriptor {
  public:
-  DEFINE_PARAMETERS_NO_CONTEXT(kTargetContext,       // register argument
-                               kApiFunctionAddress,  // register argument
-                               kArgc,                // register argument
-                               kCallData,            // stack argument 1
-                               kHolder)              // stack argument 2
-  //                           receiver is implicit stack argument 3
-  //                           argv are implicit stack arguments [4, 4 + kArgc[
-  DEFINE_PARAMETER_TYPES(MachineType::AnyTagged(),  // kTargetContext
-                         MachineType::Pointer(),    // kApiFunctionAddress
-                         MachineType::IntPtr(),     // kArgc
+  DEFINE_PARAMETERS(kApiFunctionAddress, kActualArgumentsCount, kCallData,
+                    kHolder)
+  //                           receiver is implicit stack argument 1
+  //                           argv are implicit stack arguments [2, 2 + kArgc[
+  DEFINE_PARAMETER_TYPES(MachineType::Pointer(),    // kApiFunctionAddress
+                         MachineType::IntPtr(),     // kActualArgumentsCount
                          MachineType::AnyTagged(),  // kCallData
                          MachineType::AnyTagged())  // kHolder
   DECLARE_DESCRIPTOR(ApiCallbackDescriptor, CallInterfaceDescriptor)
@@ -1150,6 +1157,24 @@ class WasmMemoryGrowDescriptor final : public CallInterfaceDescriptor {
   DECLARE_DESCRIPTOR(WasmMemoryGrowDescriptor, CallInterfaceDescriptor)
 };
 
+class WasmTableGetDescriptor final : public CallInterfaceDescriptor {
+ public:
+  DEFINE_PARAMETERS_NO_CONTEXT(kTableIndex, kEntryIndex)
+  DEFINE_RESULT_AND_PARAMETER_TYPES(MachineType::AnyTagged(),     // result 1
+                                    MachineType::TaggedSigned(),  // kTableIndex
+                                    MachineType::Int32())         // kEntryIndex
+  DECLARE_DESCRIPTOR(WasmTableGetDescriptor, CallInterfaceDescriptor)
+};
+
+class WasmTableSetDescriptor final : public CallInterfaceDescriptor {
+ public:
+  DEFINE_PARAMETERS_NO_CONTEXT(kTableIndex, kEntryIndex, kValue)
+  DEFINE_PARAMETER_TYPES(MachineType::TaggedSigned(),  // kTableIndex
+                         MachineType::Int32(),         // kEntryIndex
+                         MachineType::AnyTagged())     // kValue
+  DECLARE_DESCRIPTOR(WasmTableSetDescriptor, CallInterfaceDescriptor)
+};
+
 class WasmThrowDescriptor final : public CallInterfaceDescriptor {
  public:
   DEFINE_PARAMETERS_NO_CONTEXT(kException)
@@ -1158,11 +1183,11 @@ class WasmThrowDescriptor final : public CallInterfaceDescriptor {
   DECLARE_DESCRIPTOR(WasmThrowDescriptor, CallInterfaceDescriptor)
 };
 
-class BigIntToWasmI64Descriptor final : public CallInterfaceDescriptor {
+class I64ToBigIntDescriptor final : public CallInterfaceDescriptor {
  public:
   DEFINE_PARAMETERS_NO_CONTEXT(kArgument)
   DEFINE_PARAMETER_TYPES(MachineType::Int64())  // kArgument
-  DECLARE_DESCRIPTOR(BigIntToWasmI64Descriptor, CallInterfaceDescriptor)
+  DECLARE_DESCRIPTOR(I64ToBigIntDescriptor, CallInterfaceDescriptor)
 };
 
 class BigIntToI64Descriptor final : public CallInterfaceDescriptor {
@@ -1173,13 +1198,13 @@ class BigIntToI64Descriptor final : public CallInterfaceDescriptor {
   DECLARE_DESCRIPTOR(BigIntToI64Descriptor, CallInterfaceDescriptor)
 };
 
-class WasmAtomicWakeDescriptor final : public CallInterfaceDescriptor {
+class WasmAtomicNotifyDescriptor final : public CallInterfaceDescriptor {
  public:
   DEFINE_PARAMETERS_NO_CONTEXT(kAddress, kCount)
   DEFINE_RESULT_AND_PARAMETER_TYPES(MachineType::Uint32(),  // result 1
                                     MachineType::Uint32(),  // kAddress
                                     MachineType::Uint32())  // kCount
-  DECLARE_DESCRIPTOR(WasmAtomicWakeDescriptor, CallInterfaceDescriptor)
+  DECLARE_DESCRIPTOR(WasmAtomicNotifyDescriptor, CallInterfaceDescriptor)
 };
 
 class WasmI32AtomicWaitDescriptor final : public CallInterfaceDescriptor {

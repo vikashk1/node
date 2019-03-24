@@ -283,7 +283,6 @@ bool IntrinsicHasNoSideEffect(Runtime::FunctionId id) {
   V(ThrowReferenceError)                      \
   V(ThrowSymbolIteratorInvalid)               \
   /* Strings */                               \
-  V(RegExpInternalReplace)                    \
   V(StringIncludes)                           \
   V(StringIndexOf)                            \
   V(StringReplaceOneCharWithString)           \
@@ -301,8 +300,8 @@ bool IntrinsicHasNoSideEffect(Runtime::FunctionId id) {
   V(CreateObjectLiteralWithoutAllocationSite) \
   V(CreateRegExpLiteral)                      \
   /* Called from builtins */                  \
-  V(AllocateInNewSpace)                       \
-  V(AllocateInTargetSpace)                    \
+  V(AllocateInYoungGeneration)                \
+  V(AllocateInOldGeneration)                  \
   V(AllocateSeqOneByteString)                 \
   V(AllocateSeqTwoByteString)                 \
   V(ArrayIncludes_Slow)                       \
@@ -626,7 +625,7 @@ DebugInfo::SideEffectState BuiltinGetSideEffectState(Builtins::Name id) {
     // WeakMap builtins.
     case Builtins::kWeakMapConstructor:
     case Builtins::kWeakMapGet:
-    case Builtins::kWeakMapHas:
+    case Builtins::kWeakMapPrototypeHas:
     // Math builtins.
     case Builtins::kMathAbs:
     case Builtins::kMathAcos:
@@ -691,7 +690,7 @@ DebugInfo::SideEffectState BuiltinGetSideEffectState(Builtins::Name id) {
     case Builtins::kSetPrototypeValues:
     // WeakSet builtins.
     case Builtins::kWeakSetConstructor:
-    case Builtins::kWeakSetHas:
+    case Builtins::kWeakSetPrototypeHas:
     // String builtins. Strings are immutable.
     case Builtins::kStringFromCharCode:
     case Builtins::kStringFromCodePoint:
@@ -771,8 +770,8 @@ DebugInfo::SideEffectState BuiltinGetSideEffectState(Builtins::Name id) {
     case Builtins::kRegExpConstructor:
     // Internal.
     case Builtins::kStrictPoisonPillThrower:
-    case Builtins::kAllocateInNewSpace:
-    case Builtins::kAllocateInOldSpace:
+    case Builtins::kAllocateInYoungGeneration:
+    case Builtins::kAllocateInOldGeneration:
       return DebugInfo::kHasNoSideEffect;
 
     // Set builtins.
@@ -925,6 +924,7 @@ static bool TransitivelyCalledBuiltinHasNoSideEffect(Builtins::Name caller,
     case Builtins::kArraySomeLoopContinuation:
     case Builtins::kArrayTimSort:
     case Builtins::kCall_ReceiverIsAny:
+    case Builtins::kCall_ReceiverIsNullOrUndefined:
     case Builtins::kCallWithArrayLike:
     case Builtins::kCEntry_Return1_DontSaveFPRegs_ArgvOnStack_NoBuiltinExit:
     case Builtins::kCEntry_Return1_DontSaveFPRegs_ArgvOnStack_BuiltinExit:
@@ -949,7 +949,7 @@ static bool TransitivelyCalledBuiltinHasNoSideEffect(Builtins::Name caller,
     case Builtins::kFlattenIntoArray:
     case Builtins::kGetProperty:
     case Builtins::kHasProperty:
-    case Builtins::kMathPowInternal:
+    case Builtins::kCreateHTML:
     case Builtins::kNonNumberToNumber:
     case Builtins::kNonPrimitiveToPrimitive_Number:
     case Builtins::kNumberToString:
@@ -977,6 +977,14 @@ static bool TransitivelyCalledBuiltinHasNoSideEffect(Builtins::Name caller,
       switch (caller) {
         case Builtins::kArrayPrototypeJoin:
         case Builtins::kArrayPrototypeToLocaleString:
+          return true;
+        default:
+          return false;
+      }
+    case Builtins::kFastCreateDataProperty:
+      switch (caller) {
+        case Builtins::kArrayPrototypeSlice:
+        case Builtins::kArrayFilter:
           return true;
         default:
           return false;

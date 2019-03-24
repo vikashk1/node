@@ -19,14 +19,9 @@ class JSCollection : public JSObject {
   // [table]: the backing hash table
   DECL_ACCESSORS(table, Object)
 
-// Layout description.
-#define JS_COLLECTION_FIELDS(V) \
-  V(kTableOffset, kTaggedSize)  \
-  /* Header size. */            \
-  V(kSize, 0)
-
-  DEFINE_FIELD_OFFSET_CONSTANTS(JSObject::kHeaderSize, JS_COLLECTION_FIELDS)
-#undef JS_COLLECTION_FIELDS
+  // Layout description.
+  DEFINE_FIELD_OFFSET_CONSTANTS(JSObject::kHeaderSize,
+                                TORQUE_GENERATED_JSCOLLECTION_FIELDS)
 
   static const int kAddFunctionDescriptorIndex = 3;
 
@@ -109,15 +104,8 @@ class JSWeakCollection : public JSObject {
   static Handle<JSArray> GetEntries(Handle<JSWeakCollection> holder,
                                     int max_entries);
 
-// Layout description.
-#define JS_WEAK_COLLECTION_FIELDS(V) \
-  V(kTableOffset, kTaggedSize)       \
-  /* Header size. */                 \
-  V(kSize, 0)
-
   DEFINE_FIELD_OFFSET_CONSTANTS(JSObject::kHeaderSize,
-                                JS_WEAK_COLLECTION_FIELDS)
-#undef JS_WEAK_COLLECTION_FIELDS
+                                TORQUE_GENERATED_JSWEAK_COLLECTION_FIELDS)
 
   static const int kAddFunctionDescriptorIndex = 3;
 

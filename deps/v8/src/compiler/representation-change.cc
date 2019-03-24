@@ -196,6 +196,11 @@ Node* RepresentationChanger::GetRepresentationFor(
              use_info.type_check() == TypeCheckKind::kSigned64);
       return GetWord64RepresentationFor(node, output_rep, output_type, use_node,
                                         use_info);
+    // TODO(solanes): Create the code for the compressed values
+    case MachineRepresentation::kCompressedSigned:
+    case MachineRepresentation::kCompressedPointer:
+    case MachineRepresentation::kCompressed:
+      UNREACHABLE();
     case MachineRepresentation::kSimd128:
     case MachineRepresentation::kNone:
       return node;
@@ -467,9 +472,13 @@ Node* RepresentationChanger::GetTaggedRepresentationFor(
   } else if (IsWord(output_rep)) {
     if (output_type.Is(Type::Signed31())) {
       op = simplified()->ChangeInt31ToTaggedSigned();
-    } else if (output_type.Is(Type::Signed32())) {
+    } else if (output_type.Is(Type::Signed32()) ||
+               (output_type.Is(Type::Signed32OrMinusZero()) &&
+                truncation.IdentifiesZeroAndMinusZero())) {
       op = simplified()->ChangeInt32ToTagged();
     } else if (output_type.Is(Type::Unsigned32()) ||
+               (output_type.Is(Type::Unsigned32OrMinusZero()) &&
+                truncation.IdentifiesZeroAndMinusZero()) ||
                truncation.IsUsedAsWord32()) {
       // Either the output is uint32 or the uses only care about the
       // low 32 bits (so we can pick uint32 safely).
@@ -520,7 +529,9 @@ Node* RepresentationChanger::GetTaggedRepresentationFor(
                    Type::Unsigned32())) {  // float64 -> uint32 -> tagged
       node = InsertChangeFloat64ToUint32(node);
       op = simplified()->ChangeUint32ToTagged();
-    } else if (output_type.Is(Type::Number())) {
+    } else if (output_type.Is(Type::Number()) ||
+               (output_type.Is(Type::NumberOrOddball()) &&
+                truncation.IsUsedAsFloat64())) {
       op = simplified()->ChangeFloat64ToTagged(
           output_type.Maybe(Type::MinusZero())
               ? CheckForMinusZeroMode::kCheckForMinusZero
@@ -637,7 +648,17 @@ Node* RepresentationChanger::GetFloat64RepresentationFor(
       op = machine()->ChangeUint32ToFloat64();
     }
   } else if (output_rep == MachineRepresentation::kBit) {
-    op = machine()->ChangeUint32ToFloat64();
+    CHECK(output_type.Is(Type::Boolean()));
+    if (use_info.truncation().IsUsedAsFloat64()) {
+      op = machine()->ChangeUint32ToFloat64();
+    } else {
+      CHECK_NE(use_info.type_check(), TypeCheckKind::kNone);
+      Node* unreachable =
+          InsertUnconditionalDeopt(use_node, DeoptimizeReason::kNotAHeapNumber);
+      return jsgraph()->graph()->NewNode(
+          jsgraph()->common()->DeadValue(MachineRepresentation::kFloat64),
+          unreachable);
+    }
   } else if (output_rep == MachineRepresentation::kTagged ||
              output_rep == MachineRepresentation::kTaggedSigned ||
              output_rep == MachineRepresentation::kTaggedPointer) {
@@ -961,9 +982,12 @@ Node* RepresentationChanger::GetWord64RepresentationFor(
       break;
     case IrOpcode::kNumberConstant: {
       double const fv = OpParameter<double>(node->op());
-      int64_t const iv = static_cast<int64_t>(fv);
-      if (static_cast<double>(iv) == fv) {
-        return jsgraph()->Int64Constant(iv);
+      using limits = std::numeric_limits<int64_t>;
+      if (fv <= limits::max() && fv >= limits::min()) {
+        int64_t const iv = static_cast<int64_t>(fv);
+        if (static_cast<double>(iv) == fv) {
+          return jsgraph()->Int64Constant(iv);
+        }
       }
       break;
     }
@@ -978,7 +1002,13 @@ Node* RepresentationChanger::GetWord64RepresentationFor(
     return jsgraph()->graph()->NewNode(
         jsgraph()->common()->DeadValue(MachineRepresentation::kWord64), node);
   } else if (output_rep == MachineRepresentation::kBit) {
-    return node;  // Sloppy comparison -> word64
+    CHECK(output_type.Is(Type::Boolean()));
+    CHECK_NE(use_info.type_check(), TypeCheckKind::kNone);
+    Node* unreachable =
+        InsertUnconditionalDeopt(use_node, DeoptimizeReason::kNotASmi);
+    return jsgraph()->graph()->NewNode(
+        jsgraph()->common()->DeadValue(MachineRepresentation::kWord64),
+        unreachable);
   } else if (IsWord(output_rep)) {
     if (output_type.Is(Type::Unsigned32())) {
       op = machine()->ChangeUint32ToUint64();

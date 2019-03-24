@@ -53,19 +53,8 @@ class PrototypeInfo : public Struct {
   DECL_PRINTER(PrototypeInfo)
   DECL_VERIFIER(PrototypeInfo)
 
-// Layout description.
-#define PROTOTYPE_INFO_FIELDS(V)           \
-  V(kJSModuleNamespaceOffset, kTaggedSize) \
-  V(kPrototypeUsersOffset, kTaggedSize)    \
-  V(kRegistrySlotOffset, kTaggedSize)      \
-  V(kValidityCellOffset, kTaggedSize)      \
-  V(kObjectCreateMapOffset, kTaggedSize)   \
-  V(kBitFieldOffset, kTaggedSize)          \
-  /* Total size. */                        \
-  V(kSize, 0)
-
-  DEFINE_FIELD_OFFSET_CONSTANTS(HeapObject::kHeaderSize, PROTOTYPE_INFO_FIELDS)
-#undef PROTOTYPE_INFO_FIELDS
+  DEFINE_FIELD_OFFSET_CONSTANTS(HeapObject::kHeaderSize,
+                                TORQUE_GENERATED_PROTOTYPE_INFO_FIELDS)
 
   // Bit field usage.
   static const int kShouldBeFastBit = 0;
@@ -93,9 +82,9 @@ class PrototypeUsers : public WeakArrayList {
   // must not cause GC.
   typedef void (*CompactionCallback)(HeapObject object, int from_index,
                                      int to_index);
-  static WeakArrayList Compact(Handle<WeakArrayList> array, Heap* heap,
-                               CompactionCallback callback,
-                               PretenureFlag pretenure = NOT_TENURED);
+  static WeakArrayList Compact(
+      Handle<WeakArrayList> array, Heap* heap, CompactionCallback callback,
+      AllocationType allocation = AllocationType::kYoung);
 
 #ifdef VERIFY_HEAP
   static void Verify(WeakArrayList array);

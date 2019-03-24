@@ -68,9 +68,7 @@ Register GetRegisterThatIsNotOneOf(Register reg1, Register reg2 = no_reg,
 
 class V8_EXPORT_PRIVATE TurboAssembler : public TurboAssemblerBase {
  public:
-  template <typename... Args>
-  explicit TurboAssembler(Args&&... args)
-      : TurboAssemblerBase(std::forward<Args>(args)...) {}
+  using TurboAssemblerBase::TurboAssemblerBase;
 
   // Converts the integer (untagged smi) in |src| to a double, storing
   // the result to |dst|
@@ -152,6 +150,8 @@ class V8_EXPORT_PRIVATE TurboAssembler : public TurboAssemblerBase {
   void StorePU(Register src, const MemOperand& mem, Register scratch = no_reg);
 
   void LoadDouble(DoubleRegister dst, const MemOperand& mem,
+                  Register scratch = no_reg);
+  void LoadFloat32(DoubleRegister dst, const MemOperand& mem,
                   Register scratch = no_reg);
   void LoadDoubleLiteral(DoubleRegister result, Double value, Register scratch);
 
@@ -647,40 +647,10 @@ class V8_EXPORT_PRIVATE TurboAssembler : public TurboAssemblerBase {
 // MacroAssembler implements a collection of frequently used acros.
 class V8_EXPORT_PRIVATE MacroAssembler : public TurboAssembler {
  public:
-  template <typename... Args>
-  explicit MacroAssembler(Args&&... args)
-      : TurboAssembler(std::forward<Args>(args)...) {}
+  using TurboAssembler::TurboAssembler;
 
   // ---------------------------------------------------------------------------
   // GC Support
-
-  void IncrementalMarkingRecordWriteHelper(Register object, Register value,
-                                           Register address);
-
-  void JumpToJSEntry(Register target);
-  // Check if object is in new space.  Jumps if the object is not in new space.
-  // The register scratch can be object itself, but scratch will be clobbered.
-  void JumpIfNotInNewSpace(Register object, Register scratch, Label* branch) {
-    InNewSpace(object, scratch, eq, branch);
-  }
-
-  // Check if object is in new space.  Jumps if the object is in new space.
-  // The register scratch can be object itself, but it will be clobbered.
-  void JumpIfInNewSpace(Register object, Register scratch, Label* branch) {
-    InNewSpace(object, scratch, ne, branch);
-  }
-
-  // Check if an object has a given incremental marking color.
-  void HasColor(Register object, Register scratch0, Register scratch1,
-                Label* has_color, int first_bit, int second_bit);
-
-  void JumpIfBlack(Register object, Register scratch0, Register scratch1,
-                   Label* on_black);
-
-  // Checks the color of an object.  If the object is white we jump to the
-  // incremental marker.
-  void JumpIfWhite(Register value, Register scratch1, Register scratch2,
-                   Register scratch3, Label* value_is_white);
 
   // Notify the garbage collector that we wrote a pointer into an object.
   // |object| is the object being stored into, |value| is the object being
@@ -743,10 +713,6 @@ class V8_EXPORT_PRIVATE MacroAssembler : public TurboAssembler {
   void LoadByte(Register dst, const MemOperand& mem, Register scratch);
   void StoreByte(Register src, const MemOperand& mem, Register scratch);
 
-  void LoadRepresentation(Register dst, const MemOperand& mem, Representation r,
-                          Register scratch = no_reg);
-  void StoreRepresentation(Register src, const MemOperand& mem,
-                           Representation r, Register scratch = no_reg);
   void LoadDoubleU(DoubleRegister dst, const MemOperand& mem,
                    Register scratch = no_reg);
 
@@ -843,6 +809,11 @@ class V8_EXPORT_PRIVATE MacroAssembler : public TurboAssembler {
     CompareRoot(with, index);
     bne(if_not_equal);
   }
+
+  // Checks if value is in range [lower_limit, higher_limit] using a single
+  // comparison.
+  void JumpIfIsInRange(Register value, unsigned lower_limit,
+                       unsigned higher_limit, Label* on_in_range);
 
   // Try to convert a double to a signed 32-bit integer.
   // CR_EQ in cr7 is set and result assigned if the conversion is exact.
@@ -991,17 +962,14 @@ class V8_EXPORT_PRIVATE MacroAssembler : public TurboAssembler {
                       const ParameterCount& actual, Label* done,
                       bool* definitely_mismatches, InvokeFlag flag);
 
-  // Helper for implementing JumpIfNotInNewSpace and JumpIfInNewSpace.
-  void InNewSpace(Register object, Register scratch,
-                  Condition cond,  // eq for new space, ne otherwise.
-                  Label* branch);
-
   // Compute memory operands for safepoint stack slots.
   static int SafepointRegisterStackIndex(int reg_code);
 
   // Needs access to SafepointRegisterStackIndex for compiled frame
   // traversal.
   friend class StandardFrame;
+
+  DISALLOW_IMPLICIT_CONSTRUCTORS(MacroAssembler);
 };
 
 // -----------------------------------------------------------------------------

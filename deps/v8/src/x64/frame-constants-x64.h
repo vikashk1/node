@@ -24,8 +24,9 @@ class EntryFrameConstants : public AllStatic {
   // On x64, there are 7 pushq() and 3 Push() calls between setting up rbp and
   // pushing the c_entry_fp, plus we manually allocate kXMMRegistersBlockSize
   // bytes on the stack.
-  static constexpr int kCallerFPOffset =
-      -3 * kSystemPointerSize + -7 * kRegisterSize - kXMMRegistersBlockSize;
+  static constexpr int kCallerFPOffset = -3 * kSystemPointerSize +
+                                         -7 * kSystemPointerSize -
+                                         kXMMRegistersBlockSize;
 
   // Stack offsets for arguments passed to JSEntry.
   static constexpr int kArgcOffset = 6 * kSystemPointerSize;
@@ -36,15 +37,14 @@ class EntryFrameConstants : public AllStatic {
   // On x64, there are 5 pushq() and 3 Push() calls between setting up rbp and
   // pushing the c_entry_fp.
   static constexpr int kCallerFPOffset =
-      -3 * kSystemPointerSize + -5 * kRegisterSize;
+      -3 * kSystemPointerSize + -5 * kSystemPointerSize;
 #endif
 };
 
 class ExitFrameConstants : public TypedFrameConstants {
  public:
   static constexpr int kSPOffset = TYPED_FRAME_PUSHED_VALUE_OFFSET(0);
-  static constexpr int kCodeOffset = TYPED_FRAME_PUSHED_VALUE_OFFSET(1);
-  DEFINE_TYPED_FRAME_SIZES(2);
+  DEFINE_TYPED_FRAME_SIZES(1);
 
   static constexpr int kCallerFPOffset = +0 * kSystemPointerSize;
   static constexpr int kCallerPCOffset = kFPOnStackSize;

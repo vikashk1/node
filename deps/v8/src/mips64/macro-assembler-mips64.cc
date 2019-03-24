@@ -16,6 +16,7 @@
 #include "src/debug/debug.h"
 #include "src/external-reference-table.h"
 #include "src/frames-inl.h"
+#include "src/heap/heap-inl.h"  // For MemoryChunk.
 #include "src/macro-assembler.h"
 #include "src/objects/heap-number.h"
 #include "src/register-configuration.h"
@@ -4259,6 +4260,19 @@ void TurboAssembler::Call(Register target, Condition cond, Register rs,
   }
 }
 
+void MacroAssembler::JumpIfIsInRange(Register value, unsigned lower_limit,
+                                     unsigned higher_limit,
+                                     Label* on_in_range) {
+  if (lower_limit != 0) {
+    UseScratchRegisterScope temps(this);
+    Register scratch = temps.Acquire();
+    Dsubu(scratch, value, Operand(lower_limit));
+    Branch(on_in_range, ls, scratch, Operand(higher_limit - lower_limit));
+  } else {
+    Branch(on_in_range, ls, value, Operand(higher_limit - lower_limit));
+  }
+}
+
 void TurboAssembler::Call(Address target, RelocInfo::Mode rmode, Condition cond,
                           Register rs, const Operand& rt, BranchDelaySlot bd) {
   BlockTrampolinePoolScope block_trampoline_pool(this);
@@ -5154,19 +5168,18 @@ void MacroAssembler::EnterExitFrame(bool save_doubles, int stack_space,
   // [fp + 0 (==kCallerFPOffset)] - saved old fp
   // [fp - 1 StackFrame::EXIT Smi
   // [fp - 2 (==kSPOffset)] - sp of the called function
-  // [fp - 3 (==kCodeOffset)] - CodeObject
   // fp - (2 + stack_space + alignment) == sp == [fp - kSPOffset] - top of the
   //   new stack (will contain saved ra)
 
-  // Save registers and reserve room for saved entry sp and code object.
+  // Save registers and reserve room for saved entry sp.
   daddiu(sp, sp, -2 * kPointerSize - ExitFrameConstants::kFixedFrameSizeFromFp);
-  Sd(ra, MemOperand(sp, 4 * kPointerSize));
-  Sd(fp, MemOperand(sp, 3 * kPointerSize));
+  Sd(ra, MemOperand(sp, 3 * kPointerSize));
+  Sd(fp, MemOperand(sp, 2 * kPointerSize));
   {
     UseScratchRegisterScope temps(this);
     Register scratch = temps.Acquire();
     li(scratch, Operand(StackFrame::TypeToMarker(frame_type)));
-    Sd(scratch, MemOperand(sp, 2 * kPointerSize));
+    Sd(scratch, MemOperand(sp, 1 * kPointerSize));
   }
   // Set up new frame pointer.
   daddiu(fp, sp, ExitFrameConstants::kFixedFrameSizeFromFp);
@@ -5177,10 +5190,6 @@ void MacroAssembler::EnterExitFrame(bool save_doubles, int stack_space,
 
   {
     BlockTrampolinePoolScope block_trampoline_pool(this);
-    // Accessed from ExitFrame::code_slot.
-    li(t8, CodeObject(), CONSTANT_SIZE);
-    Sd(t8, MemOperand(fp, ExitFrameConstants::kCodeOffset));
-
     // Save the frame pointer and the context in top.
     li(t8, ExternalReference::Create(IsolateAddressId::kCEntryFPAddress,
                                      isolate()));

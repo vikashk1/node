@@ -15,6 +15,7 @@
 #include "src/field-type.h"
 #include "src/global-handles.h"
 #include "src/heap/factory.h"
+#include "src/heap/heap-inl.h"
 #include "src/heap/incremental-marking.h"
 #include "src/heap/spaces.h"
 #include "src/ic/ic.h"
@@ -954,7 +955,8 @@ TEST(Regress436816) {
       LayoutDescriptor::New(isolate, map, descriptors, kPropsCount);
   map->InitializeDescriptors(isolate, *descriptors, *layout_descriptor);
 
-  Handle<JSObject> object = factory->NewJSObjectFromMap(map, TENURED);
+  Handle<JSObject> object =
+      factory->NewJSObjectFromMap(map, AllocationType::kOld);
 
   Address fake_address = static_cast<Address>(~kHeapObjectTagMask);
   HeapObject fake_object = HeapObject::FromAddress(fake_address);
@@ -1091,7 +1093,8 @@ TEST(DoScavenge) {
             .ToHandleChecked();
 
   // Create object in new space.
-  Handle<JSObject> obj = factory->NewJSObjectFromMap(map, NOT_TENURED);
+  Handle<JSObject> obj =
+      factory->NewJSObjectFromMap(map, AllocationType::kYoung);
 
   Handle<HeapNumber> heap_number = factory->NewHeapNumber(42.5);
   WriteToField(*obj, 0, *heap_number);
@@ -1114,7 +1117,7 @@ TEST(DoScavenge) {
 
   // Construct a double value that looks like a pointer to the new space object
   // and store it into the obj.
-  Address fake_object = temp->ptr() + kPointerSize;
+  Address fake_object = temp->ptr() + kSystemPointerSize;
   double boom_value = bit_cast<double>(fake_object);
 
   FieldIndex field_index = FieldIndex::ForDescriptor(obj->map(), 0);
@@ -1165,12 +1168,14 @@ TEST(DoScavengeWithIncrementalWriteBarrier) {
     AlwaysAllocateScope always_allocate(isolate);
     // Make sure |obj_value| is placed on an old-space evacuation candidate.
     heap::SimulateFullSpace(old_space);
-    obj_value = factory->NewJSArray(32 * KB, HOLEY_ELEMENTS, TENURED);
+    obj_value =
+        factory->NewJSArray(32 * KB, HOLEY_ELEMENTS, AllocationType::kOld);
     ec_page = Page::FromHeapObject(*obj_value);
   }
 
   // Create object in new space.
-  Handle<JSObject> obj = factory->NewJSObjectFromMap(map, NOT_TENURED);
+  Handle<JSObject> obj =
+      factory->NewJSObjectFromMap(map, AllocationType::kYoung);
 
   Handle<HeapNumber> heap_number = factory->NewHeapNumber(42.5);
   WriteToField(*obj, 0, *heap_number);
@@ -1261,11 +1266,11 @@ static void TestLayoutDescriptorHelper(Isolate* isolate,
     CHECK_EQ(expected_tagged, helper.IsTagged(index.offset(), instance_size,
                                               &end_of_region_offset));
     CHECK_GT(end_of_region_offset, 0);
-    CHECK_EQ(end_of_region_offset % kPointerSize, 0);
+    CHECK_EQ(end_of_region_offset % kTaggedSize, 0);
     CHECK(end_of_region_offset <= instance_size);
 
     for (int offset = index.offset(); offset < end_of_region_offset;
-         offset += kPointerSize) {
+         offset += kTaggedSize) {
       CHECK_EQ(expected_tagged, helper.IsTagged(index.offset()));
     }
     if (end_of_region_offset < instance_size) {
@@ -1275,7 +1280,7 @@ static void TestLayoutDescriptorHelper(Isolate* isolate,
     }
   }
 
-  for (int offset = 0; offset < JSObject::kHeaderSize; offset += kPointerSize) {
+  for (int offset = 0; offset < JSObject::kHeaderSize; offset += kTaggedSize) {
     // Header queries
     CHECK(helper.IsTagged(offset));
     int end_of_region_offset;
@@ -1448,13 +1453,13 @@ static void TestWriteBarrier(Handle<Map> map, Handle<Map> new_map,
   Handle<HeapObject> obj_value;
   {
     AlwaysAllocateScope always_allocate(isolate);
-    obj = factory->NewJSObjectFromMap(map, TENURED);
+    obj = factory->NewJSObjectFromMap(map, AllocationType::kOld);
     CHECK(old_space->Contains(*obj));
 
     obj_value = factory->NewHeapNumber(0.);
   }
 
-  CHECK(Heap::InNewSpace(*obj_value));
+  CHECK(Heap::InYoungGeneration(*obj_value));
 
   {
     FieldIndex index = FieldIndex::ForDescriptor(*map, tagged_descriptor);
@@ -1468,7 +1473,7 @@ static void TestWriteBarrier(Handle<Map> map, Handle<Map> new_map,
   // |boom_value| to the slot that was earlier recorded by write barrier.
   JSObject::MigrateToMap(obj, new_map);
 
-  Address fake_object = obj_value->ptr() + kPointerSize;
+  Address fake_object = obj_value->ptr() + kTaggedSize;
   uint64_t boom_value = bit_cast<uint64_t>(fake_object);
 
   FieldIndex double_field_index =
@@ -1513,12 +1518,13 @@ static void TestIncrementalWriteBarrier(Handle<Map> map, Handle<Map> new_map,
   Page* ec_page;
   {
     AlwaysAllocateScope always_allocate(isolate);
-    obj = factory->NewJSObjectFromMap(map, TENURED);
+    obj = factory->NewJSObjectFromMap(map, AllocationType::kOld);
     CHECK(old_space->Contains(*obj));
 
     // Make sure |obj_value| is placed on an old-space evacuation candidate.
     heap::SimulateFullSpace(old_space);
-    obj_value = factory->NewJSArray(32 * KB, HOLEY_ELEMENTS, TENURED);
+    obj_value =
+        factory->NewJSArray(32 * KB, HOLEY_ELEMENTS, AllocationType::kOld);
     ec_page = Page::FromHeapObject(*obj_value);
     CHECK_NE(ec_page, Page::FromHeapObject(*obj));
   }

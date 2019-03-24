@@ -40,16 +40,16 @@ void MemoryOptimizer::Optimize() {
 }
 
 MemoryOptimizer::AllocationGroup::AllocationGroup(Node* node,
-                                                  PretenureFlag pretenure,
+                                                  AllocationType allocation,
                                                   Zone* zone)
-    : node_ids_(zone), pretenure_(pretenure), size_(nullptr) {
+    : node_ids_(zone), allocation_(allocation), size_(nullptr) {
   node_ids_.insert(node->id());
 }
 
 MemoryOptimizer::AllocationGroup::AllocationGroup(Node* node,
-                                                  PretenureFlag pretenure,
+                                                  AllocationType allocation,
                                                   Node* size, Zone* zone)
-    : node_ids_(zone), pretenure_(pretenure), size_(size) {
+    : node_ids_(zone), allocation_(allocation), size_(size) {
   node_ids_.insert(node->id());
 }
 
@@ -71,8 +71,8 @@ MemoryOptimizer::AllocationState::AllocationState(AllocationGroup* group,
                                                   intptr_t size, Node* top)
     : group_(group), size_(size), top_(top) {}
 
-bool MemoryOptimizer::AllocationState::IsNewSpaceAllocation() const {
-  return group() && group()->IsNewSpaceAllocation();
+bool MemoryOptimizer::AllocationState::IsYoungGenerationAllocation() const {
+  return group() && group()->IsYoungGenerationAllocation();
 }
 
 void MemoryOptimizer::VisitNode(Node* node, AllocationState const* state) {
@@ -97,6 +97,8 @@ void MemoryOptimizer::VisitNode(Node* node, AllocationState const* state) {
       return VisitStoreElement(node, state);
     case IrOpcode::kStoreField:
       return VisitStoreField(node, state);
+    case IrOpcode::kStore:
+      return VisitStore(node, state);
     case IrOpcode::kBitcastTaggedToWord:
     case IrOpcode::kBitcastWordToTagged:
     case IrOpcode::kComment:
@@ -110,7 +112,6 @@ void MemoryOptimizer::VisitNode(Node* node, AllocationState const* state) {
     case IrOpcode::kProtectedLoad:
     case IrOpcode::kProtectedStore:
     case IrOpcode::kRetain:
-    case IrOpcode::kStore:
     case IrOpcode::kTaggedPoisonOnSpeculation:
     case IrOpcode::kUnalignedLoad:
     case IrOpcode::kUnalignedStore:
@@ -165,33 +166,33 @@ void MemoryOptimizer::VisitAllocateRaw(Node* node,
 
   gasm()->Reset(effect, control);
 
-  PretenureFlag pretenure = PretenureFlagOf(node->op());
+  AllocationType allocation = AllocationTypeOf(node->op());
 
   // Propagate tenuring from outer allocations to inner allocations, i.e.
   // when we allocate an object in old space and store a newly allocated
   // child object into the pretenured object, then the newly allocated
   // child object also should get pretenured to old space.
-  if (pretenure == TENURED) {
+  if (allocation == AllocationType::kOld) {
     for (Edge const edge : node->use_edges()) {
       Node* const user = edge.from();
       if (user->opcode() == IrOpcode::kStoreField && edge.index() == 0) {
         Node* const child = user->InputAt(1);
         if (child->opcode() == IrOpcode::kAllocateRaw &&
-            PretenureFlagOf(child->op()) == NOT_TENURED) {
+            AllocationTypeOf(child->op()) == AllocationType::kYoung) {
           NodeProperties::ChangeOp(child, node->op());
           break;
         }
       }
     }
   } else {
-    DCHECK_EQ(NOT_TENURED, pretenure);
+    DCHECK_EQ(AllocationType::kYoung, allocation);
     for (Edge const edge : node->use_edges()) {
       Node* const user = edge.from();
       if (user->opcode() == IrOpcode::kStoreField && edge.index() == 1) {
         Node* const parent = user->InputAt(0);
         if (parent->opcode() == IrOpcode::kAllocateRaw &&
-            PretenureFlagOf(parent->op()) == TENURED) {
-          pretenure = TENURED;
+            AllocationTypeOf(parent->op()) == AllocationType::kOld) {
+          allocation = AllocationType::kOld;
           break;
         }
       }
@@ -200,11 +201,11 @@ void MemoryOptimizer::VisitAllocateRaw(Node* node,
 
   // Determine the top/limit addresses.
   Node* top_address = __ ExternalConstant(
-      pretenure == NOT_TENURED
+      allocation == AllocationType::kYoung
           ? ExternalReference::new_space_allocation_top_address(isolate())
           : ExternalReference::old_space_allocation_top_address(isolate()));
   Node* limit_address = __ ExternalConstant(
-      pretenure == NOT_TENURED
+      allocation == AllocationType::kYoung
           ? ExternalReference::new_space_allocation_limit_address(isolate())
           : ExternalReference::old_space_allocation_limit_address(isolate()));
 
@@ -215,7 +216,7 @@ void MemoryOptimizer::VisitAllocateRaw(Node* node,
     intptr_t const object_size = m.Value();
     if (allocation_folding_ == AllocationFolding::kDoAllocationFolding &&
         state->size() <= kMaxRegularHeapObjectSize - object_size &&
-        state->group()->pretenure() == pretenure) {
+        state->group()->allocation() == allocation) {
       // We can fold this Allocate {node} into the allocation {group}
       // represented by the given {state}. Compute the upper bound for
       // the new {state}.
@@ -273,10 +274,11 @@ void MemoryOptimizer::VisitAllocateRaw(Node* node,
 
       __ Bind(&call_runtime);
       {
-        Node* target =
-            pretenure == NOT_TENURED ? __ AllocateInNewSpaceStubConstant()
-                                     : __
-                                       AllocateInOldSpaceStubConstant();
+        Node* target = allocation == AllocationType::kYoung
+                           ? __
+                             AllocateInYoungGenerationStubConstant()
+                           : __
+                             AllocateInOldGenerationStubConstant();
         if (!allocate_operator_.is_set()) {
           auto descriptor = AllocateDescriptor{};
           auto call_descriptor = Linkage::GetStubCallDescriptor(
@@ -304,7 +306,7 @@ void MemoryOptimizer::VisitAllocateRaw(Node* node,
 
       // Start a new allocation group.
       AllocationGroup* group =
-          new (zone()) AllocationGroup(value, pretenure, size, zone());
+          new (zone()) AllocationGroup(value, allocation, size, zone());
       state = AllocationState::Open(group, object_size, top, zone());
     }
   } else {
@@ -330,10 +332,11 @@ void MemoryOptimizer::VisitAllocateRaw(Node* node,
                        __ IntAdd(top, __ IntPtrConstant(kHeapObjectTag))));
 
     __ Bind(&call_runtime);
-    Node* target =
-        pretenure == NOT_TENURED ? __ AllocateInNewSpaceStubConstant()
-                                 : __
-                                   AllocateInOldSpaceStubConstant();
+    Node* target = allocation == AllocationType::kYoung
+                       ? __
+                         AllocateInYoungGenerationStubConstant()
+                       : __
+                         AllocateInOldGenerationStubConstant();
     if (!allocate_operator_.is_set()) {
       auto descriptor = AllocateDescriptor{};
       auto call_descriptor = Linkage::GetStubCallDescriptor(
@@ -348,7 +351,7 @@ void MemoryOptimizer::VisitAllocateRaw(Node* node,
 
     // Create an unfoldable allocation group.
     AllocationGroup* group =
-        new (zone()) AllocationGroup(value, pretenure, zone());
+        new (zone()) AllocationGroup(value, allocation, zone());
     state = AllocationState::Closed(group, zone());
   }
 
@@ -458,6 +461,20 @@ void MemoryOptimizer::VisitStoreField(Node* node,
   EnqueueUses(node, state);
 }
 
+void MemoryOptimizer::VisitStore(Node* node, AllocationState const* state) {
+  DCHECK_EQ(IrOpcode::kStore, node->opcode());
+  StoreRepresentation representation = StoreRepresentationOf(node->op());
+  Node* object = node->InputAt(0);
+  WriteBarrierKind write_barrier_kind = ComputeWriteBarrierKind(
+      object, state, representation.write_barrier_kind());
+  if (write_barrier_kind != representation.write_barrier_kind()) {
+    NodeProperties::ChangeOp(
+        node, machine()->Store(StoreRepresentation(
+                  representation.representation(), write_barrier_kind)));
+  }
+  EnqueueUses(node, state);
+}
+
 void MemoryOptimizer::VisitOtherEffect(Node* node,
                                        AllocationState const* state) {
   EnqueueUses(node, state);
@@ -481,7 +498,8 @@ Node* MemoryOptimizer::ComputeIndex(ElementAccess const& access, Node* index) {
 WriteBarrierKind MemoryOptimizer::ComputeWriteBarrierKind(
     Node* object, AllocationState const* state,
     WriteBarrierKind write_barrier_kind) {
-  if (state->IsNewSpaceAllocation() && state->group()->Contains(object)) {
+  if (state->IsYoungGenerationAllocation() &&
+      state->group()->Contains(object)) {
     write_barrier_kind = kNoWriteBarrier;
   }
   return write_barrier_kind;

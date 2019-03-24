@@ -5,6 +5,7 @@
 #include "test/unittests/interpreter/interpreter-assembler-unittest.h"
 
 #include "src/code-factory.h"
+#include "src/compiler/node-properties.h"
 #include "src/compiler/node.h"
 #include "src/interface-descriptors.h"
 #include "src/isolate.h"
@@ -72,8 +73,9 @@ Matcher<Node*> InterpreterAssemblerTest::InterpreterAssemblerForTest::IsStore(
 
 Matcher<Node*> InterpreterAssemblerTest::InterpreterAssemblerForTest::IsWordNot(
     const Matcher<Node*>& value_matcher) {
-  return kPointerSize == 8 ? IsWord64Xor(value_matcher, c::IsInt64Constant(-1))
-                           : IsWord32Xor(value_matcher, c::IsInt32Constant(-1));
+  return kSystemPointerSize == 8
+             ? IsWord64Xor(value_matcher, c::IsInt64Constant(-1))
+             : IsWord32Xor(value_matcher, c::IsInt32Constant(-1));
 }
 
 Matcher<Node*>
@@ -291,10 +293,10 @@ InterpreterAssemblerTest::InterpreterAssemblerForTest::IsLoadRegisterOperand(
     int offset, OperandSize operand_size) {
   Matcher<compiler::Node*> reg_operand = IsChangeInt32ToIntPtr(
       IsSignedOperand(offset, operand_size, LoadSensitivity::kSafe));
-  return IsLoad(
-      MachineType::AnyTagged(), c::IsLoadParentFramePointer(),
-      c::IsWordShl(reg_operand, c::IsIntPtrConstant(kPointerSizeLog2)),
-      LoadSensitivity::kCritical);
+  return IsBitcastWordToTagged(IsLoad(
+      MachineType::Pointer(), c::IsLoadParentFramePointer(),
+      c::IsWordShl(reg_operand, c::IsIntPtrConstant(kSystemPointerSizeLog2)),
+      LoadSensitivity::kCritical));
 }
 
 TARGET_TEST_F(InterpreterAssemblerTest, Jump) {
@@ -321,7 +323,7 @@ TARGET_TEST_F(InterpreterAssemblerTest, Jump) {
           MachineType::Pointer(),
           c::IsParameter(InterpreterDispatchDescriptor::kDispatchTable),
           c::IsWordShl(target_bytecode_matcher,
-                       c::IsIntPtrConstant(kPointerSizeLog2)));
+                       c::IsIntPtrConstant(kSystemPointerSizeLog2)));
 
       EXPECT_THAT(
           tail_call_node,
@@ -418,9 +420,10 @@ TARGET_TEST_F(InterpreterAssemblerTest, GetContext) {
     InterpreterAssemblerForTest m(&state, bytecode);
     EXPECT_THAT(
         m.GetContext(),
-        m.IsLoad(MachineType::AnyTagged(), c::IsLoadParentFramePointer(),
-                 c::IsIntPtrConstant(Register::current_context().ToOperand()
-                                     << kPointerSizeLog2)));
+        IsBitcastWordToTagged(m.IsLoad(
+            MachineType::Pointer(), c::IsLoadParentFramePointer(),
+            c::IsIntPtrConstant(Register::current_context().ToOperand() *
+                                kSystemPointerSize))));
   }
 }
 
@@ -457,7 +460,7 @@ TARGET_TEST_F(InterpreterAssemblerTest, LoadConstantPoolEntry) {
               MachineType::AnyTagged(), constant_pool_matcher,
               c::IsIntPtrAdd(
                   c::IsIntPtrConstant(FixedArray::kHeaderSize - kHeapObjectTag),
-                  c::IsWordShl(index, c::IsIntPtrConstant(kPointerSizeLog2))),
+                  c::IsWordShl(index, c::IsIntPtrConstant(kTaggedSizeLog2))),
               LoadSensitivity::kCritical));
     }
   }
@@ -533,15 +536,28 @@ TARGET_TEST_F(InterpreterAssemblerTest, LoadFeedbackVector) {
     InterpreterAssemblerForTest m(&state, bytecode);
     Node* feedback_vector = m.LoadFeedbackVector();
 
-    Matcher<Node*> load_function_matcher =
-        m.IsLoad(MachineType::AnyTagged(), c::IsLoadParentFramePointer(),
-                 c::IsIntPtrConstant(Register::function_closure().ToOperand()
-                                     << kPointerSizeLog2));
+    // Feedback vector is a phi node with two inputs. One of them is loading the
+    // feedback vector and the other is undefined constant (when feedback
+    // vectors aren't allocated). Find the input that loads feedback vector.
+    CHECK(feedback_vector->opcode() == i::compiler::IrOpcode::kPhi);
+    Node* value0 =
+        i::compiler::NodeProperties::GetValueInput(feedback_vector, 0);
+    Node* value1 =
+        i::compiler::NodeProperties::GetValueInput(feedback_vector, 1);
+    Node* load_feedback_vector = value0;
+    if (value0->opcode() == i::compiler::IrOpcode::kHeapConstant) {
+      load_feedback_vector = value1;
+    }
+
+    Matcher<Node*> load_function_matcher = IsBitcastWordToTagged(
+        m.IsLoad(MachineType::Pointer(), c::IsLoadParentFramePointer(),
+                 c::IsIntPtrConstant(Register::function_closure().ToOperand() *
+                                     kSystemPointerSize)));
     Matcher<Node*> load_vector_cell_matcher = m.IsLoad(
         MachineType::AnyTagged(), load_function_matcher,
         c::IsIntPtrConstant(JSFunction::kFeedbackCellOffset - kHeapObjectTag));
     EXPECT_THAT(
-        feedback_vector,
+        load_feedback_vector,
         m.IsLoad(MachineType::AnyTagged(), load_vector_cell_matcher,
                  c::IsIntPtrConstant(Cell::kValueOffset - kHeapObjectTag)));
   }

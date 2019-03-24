@@ -578,6 +578,7 @@ static ObjectStats::VirtualInstanceType GetFeedbackSlotType(
     case FeedbackSlotKind::kLoadGlobalInsideTypeof:
     case FeedbackSlotKind::kLoadGlobalNotInsideTypeof:
     case FeedbackSlotKind::kLoadKeyed:
+    case FeedbackSlotKind::kHasKeyed:
       if (obj == *isolate->factory()->uninitialized_symbol() ||
           obj == *isolate->factory()->premonomorphic_symbol()) {
         return ObjectStats::FEEDBACK_VECTOR_SLOT_LOAD_UNUSED_TYPE;
@@ -614,6 +615,13 @@ void ObjectStatsCollectorImpl::RecordVirtualFeedbackVectorDetails(
   virtual_objects_.insert(vector);
 
   size_t calculated_size = 0;
+
+  // Log the feedback_cell array used for create closures.
+  RecordVirtualObjectStats(
+      vector, vector->closure_feedback_cell_array(),
+      ObjectStats::FEEDBACK_VECTOR_CREATE_CLOSURE_ARRAY_TYPE,
+      vector->closure_feedback_cell_array()->Size(),
+      ObjectStats::kNoOverAllocation);
 
   // Log the feedback vector's header (fixed fields).
   size_t header_size = vector->slots_start().address() - vector->address();

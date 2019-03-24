@@ -26,6 +26,9 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# for py2/py3 compatibility
+from __future__ import print_function
+
 import os
 import shutil
 import tempfile
@@ -383,11 +386,11 @@ class ScriptTest(unittest.TestCase):
     return script(TEST_CONFIG, self, self._state).RunSteps([step_class], args)
 
   def Call(self, fun, *args, **kwargs):
-    print "Calling %s with %s and %s" % (str(fun), str(args), str(kwargs))
+    print("Calling %s with %s and %s" % (str(fun), str(args), str(kwargs)))
 
   def Command(self, cmd, args="", prefix="", pipe=True, cwd=None):
-    print "%s %s" % (cmd, args)
-    print "in %s" % cwd
+    print("%s %s" % (cmd, args))
+    print("in %s" % cwd)
     return self._mock.Call("command", cmd + " " + args, cwd=cwd)
 
   def ReadLine(self):
@@ -998,7 +1001,7 @@ Summary of changes available at:
 https://chromium.googlesource.com/v8/v8/+log/last_rol..roll_hsh
 
 Please follow these instructions for assigning/CC'ing issues:
-https://github.com/v8/v8/wiki/Triaging%20issues
+https://v8.dev/docs/triage-issues
 
 Please close rolling in case of a roll revert:
 https://v8-roll.appspot.com/

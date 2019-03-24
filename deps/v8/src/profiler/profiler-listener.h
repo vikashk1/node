@@ -54,14 +54,6 @@ class ProfilerListener : public CodeEventListener {
   void SetterCallbackEvent(Name name, Address entry_point) override;
   void SharedFunctionInfoMoveEvent(Address from, Address to) override {}
 
-  CodeEntry* NewCodeEntry(
-      CodeEventListener::LogEventsAndTags tag, const char* name,
-      const char* resource_name = CodeEntry::kEmptyResourceName,
-      int line_number = v8::CpuProfileNode::kNoLineNumberInfo,
-      int column_number = v8::CpuProfileNode::kNoColumnNumberInfo,
-      std::unique_ptr<SourcePositionTable> line_info = nullptr,
-      Address instruction_start = kNullAddress);
-
   const char* GetName(Name name) {
     return function_and_resource_names_.GetName(name);
   }
@@ -74,6 +66,8 @@ class ProfilerListener : public CodeEventListener {
   const char* GetConsName(const char* prefix, Name name) {
     return function_and_resource_names_.GetConsName(prefix, name);
   }
+
+  void set_observer(CodeEventObserver* observer) { observer_ = observer; }
 
  private:
   void AttachDeoptInlinedFrames(Code code, CodeDeoptEventRecord* rec);

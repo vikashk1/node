@@ -12,6 +12,7 @@
 #include "src/base/lazy-instance.h"
 #include "src/base/v8-fallthrough.h"
 #include "src/disasm.h"
+#include "src/utils.h"
 #include "src/x64/register-x64.h"
 #include "src/x64/sse-instr.h"
 
@@ -251,7 +252,7 @@ void InstructionTable::AddJumpConditionalShort() {
 }
 
 namespace {
-DEFINE_LAZY_LEAKY_OBJECT_GETTER(InstructionTable, GetInstructionTable);
+DEFINE_LAZY_LEAKY_OBJECT_GETTER(InstructionTable, GetInstructionTable)
 }
 
 static const InstructionDesc cmov_instructions[16] = {
@@ -1309,6 +1310,11 @@ int DisassemblerX64::AVXInstruction(byte* data) {
         break;
       case 0x54:
         AppendToBuffer("vandps %s,%s,", NameOfXMMRegister(regop),
+                       NameOfXMMRegister(vvvv));
+        current += PrintRightXMMOperand(current);
+        break;
+      case 0x55:
+        AppendToBuffer("vandnps %s,%s,", NameOfXMMRegister(regop),
                        NameOfXMMRegister(vvvv));
         current += PrintRightXMMOperand(current);
         break;

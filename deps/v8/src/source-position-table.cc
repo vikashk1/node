@@ -48,11 +48,12 @@ void SubtractFromEntry(PositionTableEntry& value,
 // Helper: Encode an integer.
 template <typename T>
 void EncodeInt(std::vector<byte>& bytes, T value) {
+  typedef typename std::make_unsigned<T>::type unsigned_type;
   // Zig-zag encoding.
   static const int kShift = sizeof(T) * kBitsPerByte - 1;
-  value = ((value << 1) ^ (value >> kShift));
+  value = ((static_cast<unsigned_type>(value) << 1) ^ (value >> kShift));
   DCHECK_GE(value, 0);
-  auto encoded = static_cast<typename std::make_unsigned<T>::type>(value);
+  unsigned_type encoded = static_cast<unsigned_type>(value);
   bool more;
   do {
     more = encoded > ValueBits::kMax;
@@ -158,7 +159,7 @@ Handle<ByteArray> SourcePositionTableBuilder::ToSourcePositionTable(
   DCHECK(!Omit());
 
   Handle<ByteArray> table = isolate->factory()->NewByteArray(
-      static_cast<int>(bytes_.size()), TENURED);
+      static_cast<int>(bytes_.size()), AllocationType::kOld);
   MemCopy(table->GetDataStartAddress(), bytes_.data(), bytes_.size());
 
 #ifdef ENABLE_SLOW_DCHECKS

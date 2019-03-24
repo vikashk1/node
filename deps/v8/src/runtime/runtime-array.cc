@@ -8,8 +8,11 @@
 #include "src/debug/debug.h"
 #include "src/elements.h"
 #include "src/heap/factory.h"
+#include "src/heap/heap-inl.h"  // For ToBoolean. TODO(jkummerow): Drop.
+#include "src/heap/heap-write-barrier-inl.h"
 #include "src/isolate-inl.h"
 #include "src/keys.h"
+#include "src/objects/allocation-site-inl.h"
 #include "src/objects/arguments-inl.h"
 #include "src/objects/hash-table-inl.h"
 #include "src/objects/js-array-inl.h"
@@ -77,7 +80,7 @@ Object RemoveArrayHolesGeneric(Isolate* isolate, Handle<JSReceiver> receiver,
 
   uint32_t num_undefined = 0;
   uint32_t current_pos = 0;
-  int num_indices = keys.is_null() ? limit : keys->length();
+  uint32_t num_indices = keys.is_null() ? limit : keys->length();
 
   // Compact keys with undefined values and moves non-undefined
   // values to the front.
@@ -88,7 +91,7 @@ Object RemoveArrayHolesGeneric(Isolate* isolate, Handle<JSReceiver> receiver,
   //       is used to track free spots in the array starting at the beginning.
   //       Holes and 'undefined' are considered free spots.
   //       A hole is when HasElement(receiver, key) is false.
-  for (int i = 0; i < num_indices; ++i) {
+  for (uint32_t i = 0; i < num_indices; ++i) {
     uint32_t key = keys.is_null() ? i : NumberToUint32(keys->get(i));
 
     // We only care about array indices that are smaller than the limit.
@@ -130,11 +133,11 @@ Object RemoveArrayHolesGeneric(Isolate* isolate, Handle<JSReceiver> receiver,
       // the remaining undefineds or delete the remaining properties.
       RETURN_FAILURE_ON_EXCEPTION(
           isolate, Object::SetElement(isolate, receiver, current_pos, element,
-                                      LanguageMode::kStrict));
+                                      ShouldThrow::kThrowOnError));
       RETURN_FAILURE_ON_EXCEPTION(
           isolate, Object::SetElement(isolate, receiver, key,
                                       isolate->factory()->undefined_value(),
-                                      LanguageMode::kStrict));
+                                      ShouldThrow::kThrowOnError));
       ++current_pos;
     }
   }
@@ -152,7 +155,7 @@ Object RemoveArrayHolesGeneric(Isolate* isolate, Handle<JSReceiver> receiver,
     RETURN_FAILURE_ON_EXCEPTION(
         isolate, Object::SetElement(isolate, receiver, current_pos++,
                                     isolate->factory()->undefined_value(),
-                                    LanguageMode::kStrict));
+                                    ShouldThrow::kThrowOnError));
   }
   // TODO(szuend): Re-enable when we also copy from the prototype chain for
   //               JSArrays. Then we can use HasOwnProperty instead of
@@ -160,7 +163,8 @@ Object RemoveArrayHolesGeneric(Isolate* isolate, Handle<JSReceiver> receiver,
   // DCHECK_LE(current_pos, num_indices);
 
   // Deleting everything after the undefineds up unto the limit.
-  for (int i = num_indices - 1; i >= 0; --i) {
+  for (uint32_t i = num_indices; i > 0;) {
+    --i;
     uint32_t key = keys.is_null() ? i : NumberToUint32(keys->get(i));
     if (key < current_pos) break;
     if (key >= limit) continue;
@@ -207,9 +211,11 @@ Object RemoveArrayHoles(Isolate* isolate, Handle<JSReceiver> receiver,
     Handle<Map> new_map =
         JSObject::GetElementsTransitionMap(object, HOLEY_ELEMENTS);
 
-    PretenureFlag tenure = Heap::InNewSpace(*object) ? NOT_TENURED : TENURED;
+    AllocationType allocation = ObjectInYoungGeneration(*object)
+                                    ? AllocationType::kYoung
+                                    : AllocationType::kOld;
     Handle<FixedArray> fast_elements =
-        isolate->factory()->NewFixedArray(dict->NumberOfElements(), tenure);
+        isolate->factory()->NewFixedArray(dict->NumberOfElements(), allocation);
     dict->CopyValuesTo(*fast_elements);
 
     JSObject::SetMapAndElements(object, new_map, fast_elements);
@@ -336,7 +342,7 @@ Maybe<bool> ConditionalCopy(Isolate* isolate, Handle<JSReceiver> source,
   ASSIGN_RETURN_ON_EXCEPTION_VALUE(
       isolate, set_result,
       Object::SetElement(isolate, target, index, source_element,
-                         LanguageMode::kStrict),
+                         ShouldThrow::kThrowOnError),
       Nothing<bool>());
 
   return Just(true);
@@ -614,8 +620,8 @@ RUNTIME_FUNCTION(Runtime_NewArray) {
     allocation_site = site;
   }
 
-  Handle<JSArray> array = Handle<JSArray>::cast(
-      factory->NewJSObjectFromMap(initial_map, NOT_TENURED, allocation_site));
+  Handle<JSArray> array = Handle<JSArray>::cast(factory->NewJSObjectFromMap(
+      initial_map, AllocationType::kYoung, allocation_site));
 
   factory->NewJSArrayStorage(array, 0, 0, DONT_INITIALIZE_ARRAY_ELEMENTS);
 

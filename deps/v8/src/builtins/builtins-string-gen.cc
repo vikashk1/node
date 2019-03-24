@@ -9,6 +9,7 @@
 #include "src/builtins/builtins.h"
 #include "src/code-factory.h"
 #include "src/heap/factory-inl.h"
+#include "src/heap/heap-inl.h"
 #include "src/objects.h"
 #include "src/objects/property-cell.h"
 
@@ -320,7 +321,7 @@ TF_BUILTIN(SubString, StringBuiltinsAssembler) {
 }
 
 void StringBuiltinsAssembler::GenerateStringAt(
-    char const* method_name, TNode<Context> context, Node* receiver,
+    char const* method_name, TNode<Context> context, TNode<Object> receiver,
     TNode<Object> maybe_position, TNode<Object> default_return,
     const StringAtAccessor& accessor) {
   // Check that {receiver} is coercible to Object and convert it to a String.
@@ -706,7 +707,7 @@ TF_BUILTIN(StringFromCharCode, CodeStubAssembler) {
 // ES6 #sec-string.prototype.charat
 TF_BUILTIN(StringPrototypeCharAt, StringBuiltinsAssembler) {
   TNode<Context> context = CAST(Parameter(Descriptor::kContext));
-  Node* receiver = Parameter(Descriptor::kReceiver);
+  TNode<Object> receiver = CAST(Parameter(Descriptor::kReceiver));
   TNode<Object> maybe_position = CAST(Parameter(Descriptor::kPosition));
 
   GenerateStringAt("String.prototype.charAt", context, receiver, maybe_position,
@@ -721,7 +722,7 @@ TF_BUILTIN(StringPrototypeCharAt, StringBuiltinsAssembler) {
 // ES6 #sec-string.prototype.charcodeat
 TF_BUILTIN(StringPrototypeCharCodeAt, StringBuiltinsAssembler) {
   TNode<Context> context = CAST(Parameter(Descriptor::kContext));
-  Node* receiver = Parameter(Descriptor::kReceiver);
+  TNode<Object> receiver = CAST(Parameter(Descriptor::kReceiver));
   TNode<Object> maybe_position = CAST(Parameter(Descriptor::kPosition));
 
   GenerateStringAt("String.prototype.charCodeAt", context, receiver,
@@ -736,7 +737,7 @@ TF_BUILTIN(StringPrototypeCharCodeAt, StringBuiltinsAssembler) {
 // ES6 #sec-string.prototype.codepointat
 TF_BUILTIN(StringPrototypeCodePointAt, StringBuiltinsAssembler) {
   TNode<Context> context = CAST(Parameter(Descriptor::kContext));
-  Node* receiver = Parameter(Descriptor::kReceiver);
+  TNode<Object> receiver = CAST(Parameter(Descriptor::kReceiver));
   TNode<Object> maybe_position = CAST(Parameter(Descriptor::kPosition));
 
   GenerateStringAt("String.prototype.codePointAt", context, receiver,
@@ -759,8 +760,8 @@ TF_BUILTIN(StringPrototypeConcat, CodeStubAssembler) {
   CodeStubArguments arguments(
       this,
       ChangeInt32ToIntPtr(Parameter(Descriptor::kJSActualArgumentsCount)));
-  Node* receiver = arguments.GetReceiver();
-  Node* context = Parameter(Descriptor::kContext);
+  TNode<Object> receiver = arguments.GetReceiver();
+  TNode<Context> context = CAST(Parameter(Descriptor::kContext));
 
   // Check that {receiver} is coercible to Object and convert it to a String.
   receiver = ToThisString(context, receiver, "String.prototype.concat");
@@ -1159,121 +1160,6 @@ compiler::Node* StringBuiltinsAssembler::GetSubstitution(
   return var_result.value();
 }
 
-// ES6 #sec-string.prototype.repeat
-TF_BUILTIN(StringPrototypeRepeat, StringBuiltinsAssembler) {
-  Label invalid_count(this), invalid_string_length(this),
-      return_emptystring(this);
-
-  TNode<Context> context = CAST(Parameter(Descriptor::kContext));
-  Node* const receiver = Parameter(Descriptor::kReceiver);
-  TNode<Object> count = CAST(Parameter(Descriptor::kCount));
-  Node* const string =
-      ToThisString(context, receiver, "String.prototype.repeat");
-
-  VARIABLE(
-      var_count, MachineRepresentation::kTagged,
-      ToInteger_Inline(context, count, CodeStubAssembler::kTruncateMinusZero));
-
-  // Verifies a valid count and takes a fast path when the result will be an
-  // empty string.
-  {
-    Label if_count_isheapnumber(this, Label::kDeferred);
-
-    GotoIfNot(TaggedIsSmi(var_count.value()), &if_count_isheapnumber);
-    {
-      // If count is a SMI, throw a RangeError if less than 0 or greater than
-      // the maximum string length.
-      TNode<Smi> smi_count = CAST(var_count.value());
-      GotoIf(SmiLessThan(smi_count, SmiConstant(0)), &invalid_count);
-      GotoIf(SmiEqual(smi_count, SmiConstant(0)), &return_emptystring);
-      GotoIf(Word32Equal(LoadStringLengthAsWord32(string), Int32Constant(0)),
-             &return_emptystring);
-      GotoIf(SmiGreaterThan(smi_count, SmiConstant(String::kMaxLength)),
-             &invalid_string_length);
-      Return(CallBuiltin(Builtins::kStringRepeat, context, string, smi_count));
-    }
-
-    // If count is a Heap Number...
-    // 1) If count is Infinity, throw a RangeError exception
-    // 2) If receiver is an empty string, return an empty string
-    // 3) Otherwise, throw RangeError exception
-    BIND(&if_count_isheapnumber);
-    {
-      CSA_ASSERT(this, IsNumberNormalized(var_count.value()));
-      Node* const number_value = LoadHeapNumberValue(var_count.value());
-      GotoIf(Float64Equal(number_value, Float64Constant(V8_INFINITY)),
-             &invalid_count);
-      GotoIf(Float64LessThan(number_value, Float64Constant(0.0)),
-             &invalid_count);
-      Branch(Word32Equal(LoadStringLengthAsWord32(string), Int32Constant(0)),
-             &return_emptystring, &invalid_string_length);
-    }
-  }
-
-  BIND(&return_emptystring);
-  Return(EmptyStringConstant());
-
-  BIND(&invalid_count);
-  {
-    ThrowRangeError(context, MessageTemplate::kInvalidCountValue,
-                    var_count.value());
-  }
-
-  BIND(&invalid_string_length);
-  {
-    CallRuntime(Runtime::kThrowInvalidStringLength, context);
-    Unreachable();
-  }
-}
-
-// Helper with less checks
-TF_BUILTIN(StringRepeat, StringBuiltinsAssembler) {
-  Node* const context = Parameter(Descriptor::kContext);
-  Node* const string = Parameter(Descriptor::kString);
-  TNode<Smi> const count = CAST(Parameter(Descriptor::kCount));
-
-  CSA_ASSERT(this, IsString(string));
-  CSA_ASSERT(this, Word32BinaryNot(IsEmptyString(string)));
-  CSA_ASSERT(this, TaggedIsPositiveSmi(count));
-
-  // The string is repeated with the following algorithm:
-  //   let n = count;
-  //   let power_of_two_repeats = string;
-  //   let result = "";
-  //   while (true) {
-  //     if (n & 1) result += s;
-  //     n >>= 1;
-  //     if (n === 0) return result;
-  //     power_of_two_repeats += power_of_two_repeats;
-  //   }
-  VARIABLE(var_result, MachineRepresentation::kTagged, EmptyStringConstant());
-  VARIABLE(var_temp, MachineRepresentation::kTagged, string);
-  TVARIABLE(Smi, var_count, count);
-
-  Label loop(this, {&var_count, &var_result, &var_temp}), return_result(this);
-  Goto(&loop);
-  BIND(&loop);
-  {
-    {
-      Label next(this);
-      GotoIfNot(SmiToInt32(SmiAnd(var_count.value(), SmiConstant(1))), &next);
-      var_result.Bind(CallBuiltin(Builtins::kStringAdd_CheckNone, context,
-                                  var_result.value(), var_temp.value()));
-      Goto(&next);
-      BIND(&next);
-    }
-
-    var_count = SmiShr(var_count.value(), 1);
-    GotoIf(SmiEqual(var_count.value(), SmiConstant(0)), &return_result);
-    var_temp.Bind(CallBuiltin(Builtins::kStringAdd_CheckNone, context,
-                              var_temp.value(), var_temp.value()));
-    Goto(&loop);
-  }
-
-  BIND(&return_result);
-  Return(var_result.value());
-}
-
 // ES6 #sec-string.prototype.replace
 TF_BUILTIN(StringPrototypeReplace, StringBuiltinsAssembler) {
   Label out(this);
@@ -1569,8 +1455,9 @@ class StringPadAssembler : public StringBuiltinsAssembler {
   void Generate(Variant variant, const char* method_name, TNode<IntPtrT> argc,
                 TNode<Context> context) {
     CodeStubArguments arguments(this, argc);
-    Node* const receiver = arguments.GetReceiver();
-    Node* const receiver_string = ToThisString(context, receiver, method_name);
+    TNode<Object> receiver = arguments.GetReceiver();
+    TNode<String> receiver_string =
+        ToThisString(context, receiver, method_name);
     TNode<Smi> const string_length = LoadStringLengthAsSmi(receiver_string);
 
     TVARIABLE(String, var_fill_string, StringConstant(" "));
@@ -1803,9 +1690,7 @@ TNode<JSArray> StringBuiltinsAssembler::StringToArray(
         1, ParameterMode::INTPTR_PARAMETERS, IndexAdvanceMode::kPost);
 
     TNode<Map> array_map = LoadJSArrayElementsMap(PACKED_ELEMENTS, context);
-    result_array =
-        AllocateUninitializedJSArrayWithoutElements(array_map, length_smi);
-    StoreObjectField(result_array.value(), JSObject::kElementsOffset, elements);
+    result_array = AllocateJSArray(array_map, elements, length_smi);
     Goto(&done);
 
     BIND(&fill_thehole_and_call_runtime);
@@ -1940,7 +1825,7 @@ TF_BUILTIN(StringPrototypeSubstr, StringBuiltinsAssembler) {
       ChangeInt32ToIntPtr(Parameter(Descriptor::kJSActualArgumentsCount));
   CodeStubArguments args(this, argc);
 
-  Node* const receiver = args.GetReceiver();
+  TNode<Object> receiver = args.GetReceiver();
   TNode<Object> start = args.GetOptionalArgumentValue(kStartArg);
   TNode<Object> length = args.GetOptionalArgumentValue(kLengthArg);
   TNode<Context> context = CAST(Parameter(Descriptor::kContext));
@@ -2096,10 +1981,10 @@ TF_BUILTIN(StringPrototypeSubstring, StringBuiltinsAssembler) {
       ChangeInt32ToIntPtr(Parameter(Descriptor::kJSActualArgumentsCount));
   CodeStubArguments args(this, argc);
 
-  Node* const receiver = args.GetReceiver();
-  Node* const start = args.GetOptionalArgumentValue(kStartArg);
-  Node* const end = args.GetOptionalArgumentValue(kEndArg);
-  Node* const context = Parameter(Descriptor::kContext);
+  TNode<Object> receiver = args.GetReceiver();
+  TNode<Object> start = args.GetOptionalArgumentValue(kStartArg);
+  TNode<Object> end = args.GetOptionalArgumentValue(kEndArg);
+  TNode<Context> context = CAST(Parameter(Descriptor::kContext));
 
   Label out(this);
 
@@ -2175,7 +2060,7 @@ void StringTrimAssembler::Generate(String::TrimMode mode,
   Label return_emptystring(this), if_runtime(this);
 
   CodeStubArguments arguments(this, argc);
-  Node* const receiver = arguments.GetReceiver();
+  TNode<Object> receiver = arguments.GetReceiver();
 
   // Check that {receiver} is coercible to Object and convert it to a String.
   TNode<String> const string = ToThisString(context, receiver, method_name);
@@ -2333,8 +2218,8 @@ TF_BUILTIN(StringPrototypeValueOf, CodeStubAssembler) {
 }
 
 TF_BUILTIN(StringPrototypeIterator, CodeStubAssembler) {
-  Node* context = Parameter(Descriptor::kContext);
-  Node* receiver = Parameter(Descriptor::kReceiver);
+  TNode<Context> context = CAST(Parameter(Descriptor::kContext));
+  TNode<Object> receiver = CAST(Parameter(Descriptor::kReceiver));
 
   Node* string =
       ToThisString(context, receiver, "String.prototype[Symbol.iterator]");
@@ -2547,167 +2432,6 @@ TF_BUILTIN(StringToList, StringBuiltinsAssembler) {
   TNode<Context> context = CAST(Parameter(Descriptor::kContext));
   TNode<String> string = CAST(Parameter(Descriptor::kSource));
   Return(StringToList(context, string));
-}
-
-// -----------------------------------------------------------------------------
-// ES6 section B.2.3 Additional Properties of the String.prototype object
-
-class StringHtmlAssembler : public StringBuiltinsAssembler {
- public:
-  explicit StringHtmlAssembler(compiler::CodeAssemblerState* state)
-      : StringBuiltinsAssembler(state) {}
-
- protected:
-  void Generate(Node* const context, Node* const receiver,
-                const char* method_name, const char* tag_name) {
-    Node* const string = ToThisString(context, receiver, method_name);
-    std::string open_tag = "<" + std::string(tag_name) + ">";
-    std::string close_tag = "</" + std::string(tag_name) + ">";
-
-    Node* strings[] = {StringConstant(open_tag.c_str()), string,
-                       StringConstant(close_tag.c_str())};
-    Return(ConcatStrings(context, strings, arraysize(strings)));
-  }
-
-  void GenerateWithAttribute(Node* const context, Node* const receiver,
-                             const char* method_name, const char* tag_name,
-                             const char* attr, Node* const value) {
-    Node* const string = ToThisString(context, receiver, method_name);
-    Node* const value_string =
-        EscapeQuotes(context, ToString_Inline(context, value));
-    std::string open_tag_attr =
-        "<" + std::string(tag_name) + " " + std::string(attr) + "=\"";
-    std::string close_tag = "</" + std::string(tag_name) + ">";
-
-    Node* strings[] = {StringConstant(open_tag_attr.c_str()), value_string,
-                       StringConstant("\">"), string,
-                       StringConstant(close_tag.c_str())};
-    Return(ConcatStrings(context, strings, arraysize(strings)));
-  }
-
-  Node* ConcatStrings(Node* const context, Node** strings, int len) {
-    VARIABLE(var_result, MachineRepresentation::kTagged, strings[0]);
-    for (int i = 1; i < len; i++) {
-      var_result.Bind(CallStub(CodeFactory::StringAdd(isolate()), context,
-                               var_result.value(), strings[i]));
-    }
-    return var_result.value();
-  }
-
-  Node* EscapeQuotes(Node* const context, Node* const string) {
-    CSA_ASSERT(this, IsString(string));
-    Node* const regexp_function = LoadContextElement(
-        LoadNativeContext(context), Context::REGEXP_FUNCTION_INDEX);
-    Node* const initial_map = LoadObjectField(
-        regexp_function, JSFunction::kPrototypeOrInitialMapOffset);
-    // TODO(pwong): Refactor to not allocate RegExp
-    Node* const regexp =
-        CallRuntime(Runtime::kRegExpInitializeAndCompile, context,
-                    AllocateJSObjectFromMap(initial_map), StringConstant("\""),
-                    StringConstant("g"));
-
-    return CallRuntime(Runtime::kRegExpInternalReplace, context, regexp, string,
-                       StringConstant("&quot;"));
-  }
-};
-
-// ES6 #sec-string.prototype.anchor
-TF_BUILTIN(StringPrototypeAnchor, StringHtmlAssembler) {
-  Node* const context = Parameter(Descriptor::kContext);
-  Node* const receiver = Parameter(Descriptor::kReceiver);
-  Node* const value = Parameter(Descriptor::kValue);
-  GenerateWithAttribute(context, receiver, "String.prototype.anchor", "a",
-                        "name", value);
-}
-
-// ES6 #sec-string.prototype.big
-TF_BUILTIN(StringPrototypeBig, StringHtmlAssembler) {
-  Node* const context = Parameter(Descriptor::kContext);
-  Node* const receiver = Parameter(Descriptor::kReceiver);
-  Generate(context, receiver, "String.prototype.big", "big");
-}
-
-// ES6 #sec-string.prototype.blink
-TF_BUILTIN(StringPrototypeBlink, StringHtmlAssembler) {
-  Node* const context = Parameter(Descriptor::kContext);
-  Node* const receiver = Parameter(Descriptor::kReceiver);
-  Generate(context, receiver, "String.prototype.blink", "blink");
-}
-
-// ES6 #sec-string.prototype.bold
-TF_BUILTIN(StringPrototypeBold, StringHtmlAssembler) {
-  Node* const context = Parameter(Descriptor::kContext);
-  Node* const receiver = Parameter(Descriptor::kReceiver);
-  Generate(context, receiver, "String.prototype.bold", "b");
-}
-
-// ES6 #sec-string.prototype.fontcolor
-TF_BUILTIN(StringPrototypeFontcolor, StringHtmlAssembler) {
-  Node* const context = Parameter(Descriptor::kContext);
-  Node* const receiver = Parameter(Descriptor::kReceiver);
-  Node* const value = Parameter(Descriptor::kValue);
-  GenerateWithAttribute(context, receiver, "String.prototype.fontcolor", "font",
-                        "color", value);
-}
-
-// ES6 #sec-string.prototype.fontsize
-TF_BUILTIN(StringPrototypeFontsize, StringHtmlAssembler) {
-  Node* const context = Parameter(Descriptor::kContext);
-  Node* const receiver = Parameter(Descriptor::kReceiver);
-  Node* const value = Parameter(Descriptor::kValue);
-  GenerateWithAttribute(context, receiver, "String.prototype.fontsize", "font",
-                        "size", value);
-}
-
-// ES6 #sec-string.prototype.fixed
-TF_BUILTIN(StringPrototypeFixed, StringHtmlAssembler) {
-  Node* const context = Parameter(Descriptor::kContext);
-  Node* const receiver = Parameter(Descriptor::kReceiver);
-  Generate(context, receiver, "String.prototype.fixed", "tt");
-}
-
-// ES6 #sec-string.prototype.italics
-TF_BUILTIN(StringPrototypeItalics, StringHtmlAssembler) {
-  Node* const context = Parameter(Descriptor::kContext);
-  Node* const receiver = Parameter(Descriptor::kReceiver);
-  Generate(context, receiver, "String.prototype.italics", "i");
-}
-
-// ES6 #sec-string.prototype.link
-TF_BUILTIN(StringPrototypeLink, StringHtmlAssembler) {
-  Node* const context = Parameter(Descriptor::kContext);
-  Node* const receiver = Parameter(Descriptor::kReceiver);
-  Node* const value = Parameter(Descriptor::kValue);
-  GenerateWithAttribute(context, receiver, "String.prototype.link", "a", "href",
-                        value);
-}
-
-// ES6 #sec-string.prototype.small
-TF_BUILTIN(StringPrototypeSmall, StringHtmlAssembler) {
-  Node* const context = Parameter(Descriptor::kContext);
-  Node* const receiver = Parameter(Descriptor::kReceiver);
-  Generate(context, receiver, "String.prototype.small", "small");
-}
-
-// ES6 #sec-string.prototype.strike
-TF_BUILTIN(StringPrototypeStrike, StringHtmlAssembler) {
-  Node* const context = Parameter(Descriptor::kContext);
-  Node* const receiver = Parameter(Descriptor::kReceiver);
-  Generate(context, receiver, "String.prototype.strike", "strike");
-}
-
-// ES6 #sec-string.prototype.sub
-TF_BUILTIN(StringPrototypeSub, StringHtmlAssembler) {
-  Node* const context = Parameter(Descriptor::kContext);
-  Node* const receiver = Parameter(Descriptor::kReceiver);
-  Generate(context, receiver, "String.prototype.sub", "sub");
-}
-
-// ES6 #sec-string.prototype.sup
-TF_BUILTIN(StringPrototypeSup, StringHtmlAssembler) {
-  Node* const context = Parameter(Descriptor::kContext);
-  Node* const receiver = Parameter(Descriptor::kReceiver);
-  Generate(context, receiver, "String.prototype.sup", "sup");
 }
 
 }  // namespace internal

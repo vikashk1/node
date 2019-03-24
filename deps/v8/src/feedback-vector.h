@@ -40,6 +40,7 @@ enum class FeedbackSlotKind {
   kLoadGlobalNotInsideTypeof,
   kLoadGlobalInsideTypeof,
   kLoadKeyed,
+  kHasKeyed,
   kStoreGlobalStrict,
   kStoreNamedStrict,
   kStoreOwnNamed,
@@ -49,7 +50,6 @@ enum class FeedbackSlotKind {
   kCompareOp,
   kStoreDataPropertyInLiteral,
   kTypeProfile,
-  kCreateClosure,
   kLiteral,
   kForIn,
   kInstanceOf,
@@ -73,6 +73,10 @@ inline bool IsLoadGlobalICKind(FeedbackSlotKind kind) {
 
 inline bool IsKeyedLoadICKind(FeedbackSlotKind kind) {
   return kind == FeedbackSlotKind::kLoadKeyed;
+}
+
+inline bool IsKeyedHasICKind(FeedbackSlotKind kind) {
+  return kind == FeedbackSlotKind::kHasKeyed;
 }
 
 inline bool IsStoreGlobalICKind(FeedbackSlotKind kind) {
@@ -168,6 +172,10 @@ class FeedbackVector : public HeapObject {
   // marker defining optimization behaviour.
   DECL_ACCESSORS(optimized_code_weak_or_smi, MaybeObject)
 
+  // [feedback_cell_array]: The FixedArray to hold the feedback cells for any
+  // closures created by this function.
+  DECL_ACCESSORS(closure_feedback_cell_array, FixedArray)
+
   // [length]: The length of the feedback vector (not including the header, i.e.
   // the number of feedback slots).
   DECL_INT32_ACCESSORS(length)
@@ -215,6 +223,10 @@ class FeedbackVector : public HeapObject {
   inline void set(int index, Object value,
                   WriteBarrierMode mode = UPDATE_WRITE_BARRIER);
 
+  // Returns the feedback cell at |index| that is used to create the
+  // closure.
+  inline Handle<FeedbackCell> GetClosureFeedbackCell(int index) const;
+
   // Gives access to raw memory which stores the array's data.
   inline MaybeObjectSlot slots_start();
 
@@ -224,6 +236,10 @@ class FeedbackVector : public HeapObject {
   FeedbackSlot GetTypeProfileSlot() const;
 
   V8_EXPORT_PRIVATE static Handle<FeedbackVector> New(
+      Isolate* isolate, Handle<SharedFunctionInfo> shared,
+      Handle<FixedArray> closure_feedback_cell_array);
+
+  V8_EXPORT_PRIVATE static Handle<FixedArray> NewClosureFeedbackCellArray(
       Isolate* isolate, Handle<SharedFunctionInfo> shared);
 
 #define DEFINE_SLOT_KIND_PREDICATE(Name) \
@@ -278,14 +294,15 @@ class FeedbackVector : public HeapObject {
   static inline Symbol RawUninitializedSentinel(Isolate* isolate);
 
 // Layout description.
-#define FEEDBACK_VECTOR_FIELDS(V)           \
-  /* Header fields. */                      \
-  V(kSharedFunctionInfoOffset, kTaggedSize) \
-  V(kOptimizedCodeOffset, kTaggedSize)      \
-  V(kLengthOffset, kInt32Size)              \
-  V(kInvocationCountOffset, kInt32Size)     \
-  V(kProfilerTicksOffset, kInt32Size)       \
-  V(kDeoptCountOffset, kInt32Size)          \
+#define FEEDBACK_VECTOR_FIELDS(V)                 \
+  /* Header fields. */                            \
+  V(kSharedFunctionInfoOffset, kTaggedSize)       \
+  V(kOptimizedCodeOffset, kTaggedSize)            \
+  V(kClosureFeedbackCellArrayOffset, kTaggedSize) \
+  V(kLengthOffset, kInt32Size)                    \
+  V(kInvocationCountOffset, kInt32Size)           \
+  V(kProfilerTicksOffset, kInt32Size)             \
+  V(kDeoptCountOffset, kInt32Size)                \
   V(kUnalignedHeaderSize, 0)
 
   DEFINE_FIELD_OFFSET_CONSTANTS(HeapObject::kHeaderSize, FEEDBACK_VECTOR_FIELDS)
@@ -311,11 +328,17 @@ class FeedbackVector : public HeapObject {
 
 class V8_EXPORT_PRIVATE FeedbackVectorSpec {
  public:
-  explicit FeedbackVectorSpec(Zone* zone) : slot_kinds_(zone) {
+  explicit FeedbackVectorSpec(Zone* zone)
+      : slot_kinds_(zone), num_closure_feedback_cells_(0) {
     slot_kinds_.reserve(16);
   }
 
   int slots() const { return static_cast<int>(slot_kinds_.size()); }
+  int closure_feedback_cells() const { return num_closure_feedback_cells_; }
+
+  int AddFeedbackCellForCreateClosure() {
+    return num_closure_feedback_cells_++;
+  }
 
   FeedbackSlotKind GetKind(FeedbackSlot slot) const {
     return static_cast<FeedbackSlotKind>(slot_kinds_.at(slot.ToInt()));
@@ -340,12 +363,12 @@ class V8_EXPORT_PRIVATE FeedbackVectorSpec {
                        : FeedbackSlotKind::kLoadGlobalNotInsideTypeof);
   }
 
-  FeedbackSlot AddCreateClosureSlot() {
-    return AddSlot(FeedbackSlotKind::kCreateClosure);
-  }
-
   FeedbackSlot AddKeyedLoadICSlot() {
     return AddSlot(FeedbackSlotKind::kLoadKeyed);
+  }
+
+  FeedbackSlot AddKeyedHasICSlot() {
+    return AddSlot(FeedbackSlotKind::kHasKeyed);
   }
 
   FeedbackSlotKind GetStoreICSlot(LanguageMode language_mode) {
@@ -424,6 +447,7 @@ class V8_EXPORT_PRIVATE FeedbackVectorSpec {
   }
 
   ZoneVector<unsigned char> slot_kinds_;
+  unsigned int num_closure_feedback_cells_;
 
   friend class SharedFeedbackSlot;
 };
@@ -458,6 +482,12 @@ class FeedbackMetadata : public HeapObject {
   // The number of slots that this metadata contains. Stored as an int32.
   DECL_INT32_ACCESSORS(slot_count)
 
+  // The number of feedback cells required for create closures. Stored as an
+  // int32.
+  // TODO(mythria): Consider using 16 bits for this and slot_count so that we
+  // can save 4 bytes.
+  DECL_INT32_ACCESSORS(closure_feedback_cell_count)
+
   // Get slot_count using an acquire load.
   inline int32_t synchronized_slot_count() const;
 
@@ -489,7 +519,8 @@ class FeedbackMetadata : public HeapObject {
   }
 
   static const int kSlotCountOffset = HeapObject::kHeaderSize;
-  static const int kHeaderSize = kSlotCountOffset + kInt32Size;
+  static const int kFeedbackCellCountOffset = kSlotCountOffset + kInt32Size;
+  static const int kHeaderSize = kFeedbackCellCountOffset + kInt32Size;
 
   class BodyDescriptor;
 
@@ -596,23 +627,22 @@ class FeedbackNexus final {
     return vector()->GetLanguageMode(slot());
   }
 
-  InlineCacheState ic_state() const { return StateFromFeedback(); }
-  bool IsUninitialized() const { return StateFromFeedback() == UNINITIALIZED; }
-  bool IsMegamorphic() const { return StateFromFeedback() == MEGAMORPHIC; }
-  bool IsGeneric() const { return StateFromFeedback() == GENERIC; }
+  InlineCacheState ic_state() const;
+  bool IsUninitialized() const { return ic_state() == UNINITIALIZED; }
+  bool IsMegamorphic() const { return ic_state() == MEGAMORPHIC; }
+  bool IsGeneric() const { return ic_state() == GENERIC; }
 
   void Print(std::ostream& os);  // NOLINT
 
   // For map-based ICs (load, keyed-load, store, keyed-store).
-  Map FindFirstMap() const;
+  Map GetFirstMap() const;
 
-  InlineCacheState StateFromFeedback() const;
   int ExtractMaps(MapHandles* maps) const;
   MaybeObjectHandle FindHandlerForMap(Handle<Map> map) const;
   bool FindHandlers(MaybeObjectHandles* code_list, int length = -1) const;
 
   bool IsCleared() const {
-    InlineCacheState state = StateFromFeedback();
+    InlineCacheState state = ic_state();
     return !FLAG_use_ic || state == UNINITIALIZED || state == PREMONOMORPHIC;
   }
 
@@ -648,7 +678,7 @@ class FeedbackNexus final {
 
   // For KeyedLoad and KeyedStore ICs.
   IcCheckType GetKeyType() const;
-  Name FindFirstName() const;
+  Name GetName() const;
 
   // For Call ICs.
   int GetCallCount();
@@ -662,17 +692,14 @@ class FeedbackNexus final {
   typedef BitField<SpeculationMode, 0, 1> SpeculationModeField;
   typedef BitField<uint32_t, 1, 31> CallCountField;
 
-  // For CreateClosure ICs.
-  Handle<FeedbackCell> GetFeedbackCell() const;
-
   // For InstanceOf ICs.
   MaybeHandle<JSObject> GetConstructorFeedback() const;
 
   // For Global Load and Store ICs.
   void ConfigurePropertyCellMode(Handle<PropertyCell> cell);
   // Returns false if given combination of indices is not allowed.
-  bool ConfigureLexicalVarMode(int script_context_index,
-                               int context_slot_index);
+  bool ConfigureLexicalVarMode(int script_context_index, int context_slot_index,
+                               bool immutable);
   void ConfigureHandlerMode(const MaybeObjectHandle& handler);
 
   // For CloneObject ICs
@@ -682,7 +709,8 @@ class FeedbackNexus final {
 // Bit positions in a smi that encodes lexical environment variable access.
 #define LEXICAL_MODE_BIT_FIELDS(V, _)  \
   V(ContextIndexBits, unsigned, 12, _) \
-  V(SlotIndexBits, unsigned, 19, _)
+  V(SlotIndexBits, unsigned, 18, _)    \
+  V(ImmutabilityBit, bool, 1, _)
 
   DEFINE_BIT_FIELDS(LEXICAL_MODE_BIT_FIELDS)
 #undef LEXICAL_MODE_BIT_FIELDS

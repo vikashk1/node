@@ -36,10 +36,10 @@ uint32_t BuiltinsConstantsTableBuilder::AddObject(Handle<Object> object) {
             isolate_->heap()->builtins_constants_table());
 
   // Must be on the main thread.
-  DCHECK(ThreadId::Current().Equals(isolate_->thread_id()));
+  DCHECK_EQ(ThreadId::Current(), isolate_->thread_id());
 
   // Must be generating embedded builtin code.
-  DCHECK(isolate_->ShouldLoadConstantsFromRootList());
+  DCHECK(isolate_->IsGeneratingEmbeddedBuiltins());
 
   // All code objects should be loaded through the root register or use
   // pc-relative addressing.
@@ -69,7 +69,7 @@ void BuiltinsConstantsTableBuilder::PatchSelfReference(
   DCHECK_EQ(ReadOnlyRoots(isolate_).empty_fixed_array(),
             isolate_->heap()->builtins_constants_table());
 
-  DCHECK(isolate_->ShouldLoadConstantsFromRootList());
+  DCHECK(isolate_->IsGeneratingEmbeddedBuiltins());
 
   DCHECK(self_reference->IsOddball());
   DCHECK(Oddball::cast(*self_reference)->kind() ==
@@ -88,13 +88,13 @@ void BuiltinsConstantsTableBuilder::Finalize() {
 
   DCHECK_EQ(ReadOnlyRoots(isolate_).empty_fixed_array(),
             isolate_->heap()->builtins_constants_table());
-  DCHECK(isolate_->ShouldLoadConstantsFromRootList());
+  DCHECK(isolate_->IsGeneratingEmbeddedBuiltins());
 
   // An empty map means there's nothing to do.
   if (map_.size() == 0) return;
 
   Handle<FixedArray> table =
-      isolate_->factory()->NewFixedArray(map_.size(), TENURED);
+      isolate_->factory()->NewFixedArray(map_.size(), AllocationType::kOld);
 
   Builtins* builtins = isolate_->builtins();
   ConstantsMap::IteratableScope it_scope(&map_);

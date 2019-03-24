@@ -64,6 +64,12 @@ class V8_EXPORT_PRIVATE Compiler : public AllStatic {
                       IsCompiledScope* is_compiled_scope);
   static bool CompileOptimized(Handle<JSFunction> function, ConcurrencyMode);
 
+  // Collect source positions for a function that has already been compiled to
+  // bytecode, but for which source positions were not collected (e.g. because
+  // they were not immediately needed).
+  static bool CollectSourcePositions(Isolate* isolate,
+                                     Handle<SharedFunctionInfo> shared);
+
   V8_WARN_UNUSED_RESULT static MaybeHandle<SharedFunctionInfo>
   CompileForLiveEdit(ParseInfo* parse_info, Isolate* isolate);
 
@@ -79,7 +85,7 @@ class V8_EXPORT_PRIVATE Compiler : public AllStatic {
   // Give the compiler a chance to perform low-latency initialization tasks of
   // the given {function} on its instantiation. Note that only the runtime will
   // offer this chance, optimized closure instantiation will not call this.
-  static void PostInstantiation(Handle<JSFunction> function, PretenureFlag);
+  static void PostInstantiation(Handle<JSFunction> function, AllocationType);
 
   // Parser::Parse, then Compiler::Analyze.
   static bool ParseAndAnalyze(ParseInfo* parse_info,
@@ -370,8 +376,9 @@ class V8_EXPORT_PRIVATE BackgroundCompileTask {
 // Contains all data which needs to be transmitted between threads for
 // background parsing and compiling and finalizing it on the main thread.
 struct ScriptStreamingData {
-  ScriptStreamingData(ScriptCompiler::ExternalSourceStream* source_stream,
-                      ScriptCompiler::StreamedSource::Encoding encoding);
+  ScriptStreamingData(
+      std::unique_ptr<ScriptCompiler::ExternalSourceStream> source_stream,
+      ScriptCompiler::StreamedSource::Encoding encoding);
   ~ScriptStreamingData();
 
   void Release();

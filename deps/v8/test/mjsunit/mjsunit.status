@@ -33,7 +33,6 @@
   'harmony/modules-skip*': [SKIP],
   'regress/modules-skip*': [SKIP],
   'wasm/exceptions-utils': [SKIP],
-  'wasm/wasm-constants': [SKIP],
   'wasm/wasm-module-builder': [SKIP],
 
   # All tests in the bug directory are expected to fail.
@@ -77,6 +76,9 @@
 
   # Too slow in debug mode and under turbofan.
   'regress/regress-4595': [PASS, NO_VARIANTS, ['mode == debug', SKIP]],
+
+  # Too slow in debug mode, due to large allocations.
+  'regress/regress-crbug-941743': [PASS, ['mode == debug', SKIP], ['(arch == arm or arch == arm64) and simulator_run == True', SKIP]],
 
   ##############################################################################
   # Only RegExp stuff tested, no need for extensive optimizing compiler tests.
@@ -323,7 +325,7 @@
 }],  # 'gc_stress == True'
 
 ##############################################################################
-['lite_mode', {
+['lite_mode or variant == jitless', {
   # Skip tests not suitable for lite_mode.
 
   # TODO(8596): We cache the templates in the feedback vector. In lite mode
@@ -343,15 +345,15 @@
   'regress/regress-trap-allocation-memento': [SKIP],
   'regress/regress-4121': [SKIP],
 
-  # Slow tests without feedback vectors
-  # TODO(mythria): Investigate why they are slow and either fix if
-  # possible are update the reason why they are slow.
-  'spread-large-string': [SKIP],
-  'spread-large-array': [SKIP],
-
   # TODO(v8:7777): Re-enable once wasm is supported in jitless mode.
+  'regress/regress-5888': [SKIP],
+  'regress/regress-5911': [SKIP],
+  'regress/regress-813440': [SKIP],
+  'regress/regress-crbug-746835': [SKIP],
+  'regress/regress-crbug-772056': [SKIP],
+  'regress/regress-crbug-816961': [SKIP],
   'regress/wasm/*': [SKIP],
-  'tools/compiler-trace-flags': [SKIP],
+  'regress/regress-8947': [SKIP],
   'wasm/*': [SKIP],
 
   # Other tests that use asm / wasm / optimized code.
@@ -361,12 +363,14 @@
   'asm/call-annotation': [SKIP],
   'asm/global-imports': [SKIP],
   'asm/regress-913822': [SKIP],
+  'asm/regress-937650': [SKIP],
   'asm/return-types': [SKIP],
   'regress/regress-599719': [SKIP],
   'regress/regress-6196': [SKIP],
   'regress/regress-6700': [SKIP],
   'regress/regress-6838-2': [SKIP],
   'regress/regress-6838-3': [SKIP],
+  'regress/regress-crbug-934138': [SKIP],
 
   # Timeouts in lite / jitless mode.
   'asm/embenchen/*': [SKIP],
@@ -380,7 +384,17 @@
   'regress/regress-crbug-721835': [SKIP],
   'regress/regress-crbug-759327': [SKIP],
   'regress/regress-crbug-898974': [SKIP],
-}],  # 'lite_mode'
+
+  # These tests check that we can trace the compiler.
+  'tools/compiler-trace-flags': [SKIP],
+  'tools/compiler-trace-flags-wasm': [SKIP]
+}],  # 'lite_mode or variant == jitless'
+
+##############################################################################
+['lite_mode', {
+  # TODO(v8:8510): Tests that currently fail with lazy source positions.
+  'stack-traces-overflow': [SKIP],
+}], # lite_mode
 
 ##############################################################################
 ['byteorder == big', {
@@ -424,6 +438,9 @@
 
   # BUG(v8:4016)
   'regress/regress-crbug-467047': [SKIP],
+
+  # OOMing tests
+  'regress/regress-500980': [SKIP],
 
   # Slow tests.
   'array-concat': [PASS, SLOW],
@@ -718,13 +735,13 @@
 ##############################################################################
 ['system == android', {
   # Tests consistently failing on Android.
-  # Unable to change locale on Android:
-  'icu-date-to-string': [FAIL],
-  'regress/regress-6288': [FAIL],
+  # Setting the locale with environment variables unavailable
+  'icu-date-to-string': [SKIP],
+  'icu-date-lord-howe': [SKIP],
+  'regress/regress-6288': [SKIP],
   # OOM:
   'regress/regress-748069': [FAIL],
   'regress/regress-752764': [FAIL],
-  'regress/regress-779407': [FAIL],
   # Flaky OOM:
   'regress/regress-852258': [SKIP],
 }],  # 'system == android'
@@ -784,28 +801,29 @@
 
   # Fails allocation on tsan.
   'es6/classes': [PASS, ['tsan', SKIP]],
+  'regress/regress-779407': [PASS, ['tsan', SKIP]],
 
   # Tests that fail some assertions due to checking internal state sensitive
-  # to GC. We mark PASS,FAIL to not skip those tests on the endurance fuzzer.
-  'array-literal-feedback': [PASS, FAIL],
-  'compiler/dataview-neutered': [PASS, FAIL],
-  'compiler/native-context-specialization-hole-check': [PASS, FAIL],
-  'elements-transition-hoisting': [PASS, FAIL],
-  'es6/collections-constructor-custom-iterator': [PASS, FAIL],
-  'harmony/weakrefs/clear-clears-factory-pointer': [PASS, FAIL],
-  'ignition/throw-if-not-hole': [PASS, FAIL],
-  'keyed-load-with-symbol-key': [PASS, FAIL],
-  'object-seal': [PASS, FAIL],
-  'regress/regress-3709': [PASS, FAIL],
-  'regress/regress-385565': [PASS, FAIL],
-  'regress/regress-6948': [PASS, FAIL],
-  'regress/regress-7014-1': [PASS, FAIL],
-  'regress/regress-7014-2': [PASS, FAIL],
-  'regress/regress-7510': [PASS, FAIL],
-  'regress/regress-crbug-882233-2': [PASS, FAIL],
-  'regress/regress-trap-allocation-memento': [PASS, FAIL],
-  'regress/regress-unlink-closures-on-deopt': [PASS, FAIL],
-  'shared-function-tier-up-turbo': [PASS, FAIL],
+  # to GC.
+  'array-literal-feedback': [SKIP],
+  'compiler/dataview-neutered': [SKIP],
+  'compiler/native-context-specialization-hole-check': [SKIP],
+  'elements-transition-hoisting': [SKIP],
+  'es6/collections-constructor-custom-iterator': [SKIP],
+  'ignition/throw-if-not-hole': [SKIP],
+  'keyed-load-with-symbol-key': [SKIP],
+  'object-seal': [SKIP],
+  'regress/regress-3709': [SKIP],
+  'regress/regress-385565': [SKIP],
+  'regress/regress-6948': [SKIP],
+  'regress/regress-6991': [SKIP],
+  'regress/regress-7014-1': [SKIP],
+  'regress/regress-7014-2': [SKIP],
+  'regress/regress-7510': [SKIP],
+  'regress/regress-crbug-882233-2': [SKIP],
+  'regress/regress-trap-allocation-memento': [SKIP],
+  'regress/regress-unlink-closures-on-deopt': [SKIP],
+  'shared-function-tier-up-turbo': [SKIP],
 }],  # 'gc_fuzzer'
 
 ##############################################################################
@@ -850,6 +868,7 @@
   # take too long with the simulator.
   'regress/regress-1132': [SKIP],
   'regress/regress-740784': [SKIP],
+  'regress/regress-crbug-941743': [SKIP],
   'regress/regress-crbug-482998': [PASS, SLOW],
   'regress/regress-91008': [PASS, SLOW],
   'harmony/regexp-property-lu-ui': [PASS, SLOW],
@@ -865,15 +884,6 @@
   'big-array-literal': [SKIP],
   'regress/regress-353551': [SKIP],
 }],  # 'arch == ppc64'
-
-##############################################################################
-['arch == ppc64 or arch == ppc or arch == s390 or arch == s390x', {
-
-  # TODO(ppc/s390): fix constant pool issue and implement tagging for reloc
-  'wasm/compiled-module-serialization': [SKIP],
-  'regress/wasm/regress-808980': [SKIP],
-  'regress/wasm/regress-808848': [SKIP],
-}],  # 'arch == ppc64 or arch == ppc or arch == s390 or arch == s390x'
 
 ##############################################################################
 ['variant == stress', {
@@ -959,6 +969,9 @@
     # skip assertion tests since the stack trace is broken if mjsunit is
     # included in the snapshot
     'mjsunit-assertion-error' : [SKIP],
+
+    # https://crbug.com/v8/8964
+    'compiler/math-floor-global': [PASS, ['gc_stress', SKIP]]
 }], # no_harness
 
 ##############################################################################
@@ -1002,5 +1015,10 @@
   # Unwinding info writer is only supported on x64, arm, and arm64 Linux
   'regress/regress-913844': [SKIP],
 }],
+
+##############################################################################
+['variant == jitless and not embedded_builtins', {
+  '*': [SKIP],
+}], # variant == jitless and not embedded_builtins
 
 ]

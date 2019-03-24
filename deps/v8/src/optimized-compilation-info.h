@@ -55,7 +55,9 @@ class V8_EXPORT_PRIVATE OptimizedCompilationInfo final {
     kTraceTurboJson = 1 << 14,
     kTraceTurboGraph = 1 << 15,
     kTraceTurboScheduled = 1 << 16,
-    kWasmRuntimeExceptionSupport = 1 << 17
+    kWasmRuntimeExceptionSupport = 1 << 17,
+    kTurboControlFlowAwareAllocation = 1 << 18,
+    kTurboPreprocessRanges = 1 << 19
   };
 
   // Construct a compilation info for optimized compilation.
@@ -83,6 +85,18 @@ class V8_EXPORT_PRIVATE OptimizedCompilationInfo final {
   JavaScriptFrame* osr_frame() const { return osr_frame_; }
 
   // Flags used by optimized compilation.
+
+  void MarkAsTurboControlFlowAwareAllocation() {
+    SetFlag(kTurboControlFlowAwareAllocation);
+  }
+  bool is_turbo_control_flow_aware_allocation() const {
+    return GetFlag(kTurboControlFlowAwareAllocation);
+  }
+
+  void MarkAsTurboPreprocessRanges() { SetFlag(kTurboPreprocessRanges); }
+  bool is_turbo_preprocess_ranges() const {
+    return GetFlag(kTurboPreprocessRanges);
+  }
 
   void MarkAsFunctionContextSpecializing() {
     SetFlag(kFunctionContextSpecializing);
@@ -232,18 +246,12 @@ class V8_EXPORT_PRIVATE OptimizedCompilationInfo final {
 
   struct InlinedFunctionHolder {
     Handle<SharedFunctionInfo> shared_info;
-    Handle<BytecodeArray> bytecode_array;
-
+    Handle<BytecodeArray> bytecode_array;  // Explicit to prevent flushing.
     InliningPosition position;
 
     InlinedFunctionHolder(Handle<SharedFunctionInfo> inlined_shared_info,
                           Handle<BytecodeArray> inlined_bytecode,
-                          SourcePosition pos)
-        : shared_info(inlined_shared_info), bytecode_array(inlined_bytecode) {
-      position.position = pos;
-      // initialized when generating the deoptimization literals
-      position.inlined_function_id = DeoptimizationData::kNotInlinedIndex;
-    }
+                          SourcePosition pos);
 
     void RegisterInlinedFunctionId(size_t inlined_function_id) {
       position.inlined_function_id = static_cast<int>(inlined_function_id);

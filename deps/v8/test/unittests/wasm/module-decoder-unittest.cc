@@ -32,6 +32,9 @@ namespace module_decoder_unittest {
 #define WASM_INIT_EXPR_ANYREF WASM_REF_NULL, kExprEnd
 #define WASM_INIT_EXPR_GLOBAL(index) WASM_GET_GLOBAL(index), kExprEnd
 
+#define REF_NULL_ELEMENT kExprRefNull, kExprEnd
+#define REF_FUNC_ELEMENT(v) kExprRefFunc, U32V_1(v), kExprEnd
+
 #define EMPTY_BODY 0
 #define NOP_BODY 2, 0, kExprNop
 
@@ -70,6 +73,11 @@ struct CheckLEB1 : std::integral_constant<size_t, num> {
   SECTION(Unknown,                                                         \
           ADD_COUNT('s', 'o', 'u', 'r', 'c', 'e', 'M', 'a', 'p', 'p', 'i', \
                     'n', 'g', 'U', 'R', 'L'),                              \
+          ADD_COUNT(__VA_ARGS__))
+#define SECTION_COMPILATION_HINTS(...)                                     \
+  SECTION(Unknown,                                                         \
+          ADD_COUNT('c', 'o', 'm', 'p', 'i', 'l', 'a', 't', 'i', 'o', 'n', \
+                    'H', 'i', 'n', 't', 's'),                              \
           ADD_COUNT(__VA_ARGS__))
 
 #define FAIL_IF_NO_EXPERIMENTAL_EH(data)                                 \
@@ -173,7 +181,9 @@ class WasmModuleVerifyTest : public TestWithIsolateAndZone {
     size_t total = sizeof(header) + size;
     auto temp = new byte[total];
     memcpy(temp, header, sizeof(header));
-    memcpy(temp + sizeof(header), module_start, size);
+    if (size > 0) {
+      memcpy(temp + sizeof(header), module_start, size);
+    }
     ModuleResult result = DecodeWasmModule(
         enabled_features_, temp, temp + total, false, kWasmOrigin,
         isolate()->counters(), isolate()->allocator());
@@ -279,7 +289,7 @@ TEST_F(WasmModuleVerifyTest, AnyRefGlobal) {
 
     EXPECT_EQ(kWasmAnyRef, global->type);
     EXPECT_FALSE(global->mutability);
-    EXPECT_EQ(WasmInitExpr::kAnyRefConst, global->init.kind);
+    EXPECT_EQ(WasmInitExpr::kRefNullConst, global->init.kind);
   }
 }
 
@@ -582,7 +592,7 @@ TEST_F(WasmModuleVerifyTest, ExceptionSectionBeforeGlobal) {
 
   WASM_FEATURE_SCOPE(eh);
   ModuleResult result = DecodeModule(data, data + sizeof(data));
-  EXPECT_NOT_OK(result, "unexpected section: Global");
+  EXPECT_NOT_OK(result, "unexpected section <Global>");
 }
 
 TEST_F(WasmModuleVerifyTest, ExceptionSectionAfterMemoryBeforeGlobal) {
@@ -594,7 +604,7 @@ TEST_F(WasmModuleVerifyTest, ExceptionSectionAfterMemoryBeforeGlobal) {
 
   WASM_FEATURE_SCOPE(eh);
   ModuleResult result = DecodeModule(data, data + sizeof(data));
-  EXPECT_NOT_OK(result, "unexpected section: Global");
+  EXPECT_NOT_OK(result, "unexpected section <Global>");
 }
 
 TEST_F(WasmModuleVerifyTest, ExceptionImport) {
@@ -1300,6 +1310,42 @@ TEST_F(WasmModuleVerifyTest, MultipleTablesWithFlag) {
 
   EXPECT_EQ(11u, result.value()->tables[1].initial_size);
   EXPECT_EQ(kWasmAnyRef, result.value()->tables[1].type);
+}
+
+TEST_F(WasmModuleVerifyTest, TieringCompilationHints) {
+  WASM_FEATURE_SCOPE(compilation_hints);
+  static const byte data[] = {
+      SIGNATURES_SECTION(1, SIG_ENTRY_v_v),
+      FUNCTION_SIGNATURES_SECTION(3, 0, 0, 0),
+      SECTION_COMPILATION_HINTS(
+          FIRST_TIER_INTERPRETER | SECOND_TIER_BASELINE,
+          FIRST_TIER_BASELINE | SECOND_TIER_OPTIMIZED,
+          FIRST_TIER_INTERPRETER | SECOND_TIER_INTERPRETER),
+      SECTION(Code, ENTRY_COUNT(3), NOP_BODY, NOP_BODY, NOP_BODY),
+  };
+
+  ModuleResult result = DecodeModule(data, data + sizeof(data));
+  EXPECT_OK(result);
+
+  EXPECT_EQ(3u, result.value()->compilation_hints.size());
+  EXPECT_EQ(WasmCompilationHintStrategy::kDefault,
+            result.value()->compilation_hints[0].strategy);
+  EXPECT_EQ(WasmCompilationHintTier::kInterpreter,
+            result.value()->compilation_hints[0].first_tier);
+  EXPECT_EQ(WasmCompilationHintTier::kBaseline,
+            result.value()->compilation_hints[0].second_tier);
+  EXPECT_EQ(WasmCompilationHintStrategy::kDefault,
+            result.value()->compilation_hints[1].strategy);
+  EXPECT_EQ(WasmCompilationHintTier::kBaseline,
+            result.value()->compilation_hints[1].first_tier);
+  EXPECT_EQ(WasmCompilationHintTier::kOptimized,
+            result.value()->compilation_hints[1].second_tier);
+  EXPECT_EQ(WasmCompilationHintStrategy::kDefault,
+            result.value()->compilation_hints[2].strategy);
+  EXPECT_EQ(WasmCompilationHintTier::kInterpreter,
+            result.value()->compilation_hints[2].first_tier);
+  EXPECT_EQ(WasmCompilationHintTier::kInterpreter,
+            result.value()->compilation_hints[2].second_tier);
 }
 
 class WasmSignatureDecodeTest : public TestWithZone {
@@ -2114,7 +2160,7 @@ TEST_F(WasmInitExprDecodeTest, InitExpr_AnyRef) {
   WASM_FEATURE_SCOPE(anyref);
   static const byte data[] = {kExprRefNull, kExprEnd};
   WasmInitExpr expr = DecodeInitExpr(data, data + sizeof(data));
-  EXPECT_EQ(WasmInitExpr::kAnyRefConst, expr.kind);
+  EXPECT_EQ(WasmInitExpr::kRefNullConst, expr.kind);
 }
 
 TEST_F(WasmInitExprDecodeTest, InitExpr_illegal) {
@@ -2256,14 +2302,30 @@ TEST_F(WasmModuleVerifyTest, PassiveElementSegment) {
       // table declaration -----------------------------------------------------
       SECTION(Table, ENTRY_COUNT(1), kLocalAnyFunc, 0, 1),
       // element segments  -----------------------------------------------------
-      SECTION(Element, ENTRY_COUNT(1), PASSIVE,
-              ADD_COUNT(FUNC_INDEX(0), FUNC_INDEX(0))),
+      SECTION(Element, ENTRY_COUNT(1), PASSIVE, kLocalAnyFunc, U32V_1(3),
+              REF_FUNC_ELEMENT(0), REF_FUNC_ELEMENT(0), REF_NULL_ELEMENT),
       // code ------------------------------------------------------------------
       ONE_EMPTY_BODY};
   EXPECT_FAILURE(data);
   WASM_FEATURE_SCOPE(bulk_memory);
   EXPECT_VERIFIES(data);
   EXPECT_OFF_END_FAILURE(data, arraysize(data) - 5);
+}
+
+TEST_F(WasmModuleVerifyTest, PassiveElementSegmentAnyRef) {
+  static const byte data[] = {
+      // sig#0 -----------------------------------------------------------------
+      SIGNATURES_SECTION_VOID_VOID,
+      // funcs -----------------------------------------------------------------
+      ONE_EMPTY_FUNCTION(SIG_INDEX(0)),
+      // table declaration -----------------------------------------------------
+      SECTION(Table, ENTRY_COUNT(1), kLocalAnyFunc, 0, 1),
+      // element segments  -----------------------------------------------------
+      SECTION(Element, ENTRY_COUNT(1), PASSIVE, kLocalAnyRef, U32V_1(0)),
+      // code ------------------------------------------------------------------
+      ONE_EMPTY_BODY};
+  WASM_FEATURE_SCOPE(bulk_memory);
+  EXPECT_FAILURE(data);
 }
 
 TEST_F(WasmModuleVerifyTest, DataCountSectionCorrectPlacement) {
@@ -2289,7 +2351,7 @@ TEST_F(WasmModuleVerifyTest, DataCountSectionBeforeElement) {
                               SECTION(Element, ENTRY_COUNT(0))};
   WASM_FEATURE_SCOPE(bulk_memory);
   ModuleResult result = DecodeModule(data, data + sizeof(data));
-  EXPECT_NOT_OK(result, "unexpected section: Element");
+  EXPECT_NOT_OK(result, "unexpected section <Element>");
 }
 
 TEST_F(WasmModuleVerifyTest, DataCountSectionAfterStartBeforeElement) {
@@ -2307,7 +2369,7 @@ TEST_F(WasmModuleVerifyTest, DataCountSectionAfterStartBeforeElement) {
   };
   WASM_FEATURE_SCOPE(bulk_memory);
   ModuleResult result = DecodeModule(data, data + sizeof(data));
-  EXPECT_NOT_OK(result, "unexpected section: Element");
+  EXPECT_NOT_OK(result, "unexpected section <Element>");
 }
 
 TEST_F(WasmModuleVerifyTest, MultipleDataCountSections) {
@@ -2373,6 +2435,8 @@ TEST_F(WasmModuleVerifyTest, DataCountSegmentCount_omitted) {
 #undef WASM_INIT_EXPR_F64
 #undef WASM_INIT_EXPR_ANYREF
 #undef WASM_INIT_EXPR_GLOBAL
+#undef REF_NULL_ELEMENT
+#undef REF_FUNC_ELEMENT
 #undef EMPTY_BODY
 #undef NOP_BODY
 #undef SIG_ENTRY_i_i
@@ -2391,6 +2455,7 @@ TEST_F(WasmModuleVerifyTest, DataCountSegmentCount_omitted) {
 #undef SECTION_NAMES
 #undef EMPTY_NAMES_SECTION
 #undef SECTION_SRC_MAP
+#undef SECTION_COMPILATION_HINTS
 #undef FAIL_IF_NO_EXPERIMENTAL_EH
 #undef X1
 #undef X2

@@ -9,7 +9,7 @@
 
 #include "src/handles-inl.h"
 #include "src/objects-inl.h"
-#include "src/objects/descriptor-array.h"
+#include "src/objects/descriptor-array-inl.h"
 #include "src/objects/smi.h"
 
 // Has to be the last include (doesn't have include guards):
@@ -34,8 +34,9 @@ Handle<LayoutDescriptor> LayoutDescriptor::New(Isolate* isolate, int length) {
     return handle(LayoutDescriptor::FromSmi(Smi::zero()), isolate);
   }
   int backing_store_length = GetSlowModeBackingStoreLength(length);
-  Handle<LayoutDescriptor> result = Handle<LayoutDescriptor>::cast(
-      isolate->factory()->NewByteArray(backing_store_length, TENURED));
+  Handle<LayoutDescriptor> result =
+      Handle<LayoutDescriptor>::cast(isolate->factory()->NewByteArray(
+          backing_store_length, AllocationType::kOld));
   memset(reinterpret_cast<void*>(result->GetDataStartAddress()), 0,
          result->DataSize());
   return result;

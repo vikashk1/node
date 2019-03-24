@@ -7,6 +7,7 @@
 
 #include "src/ast/ast.h"
 #include "src/feedback-vector.h"
+#include "src/function-kind.h"
 #include "src/interpreter/bytecode-array-builder.h"
 #include "src/interpreter/bytecode-label.h"
 #include "src/interpreter/bytecode-register.h"
@@ -203,6 +204,8 @@ class BytecodeGenerator final : public AstVisitor<BytecodeGenerator> {
   void BuildAssignment(const AssignmentLhsData& data, Token::Value op,
                        LookupHoistingMode lookup_hoisting_mode);
 
+  void BuildThisVariableLoad();
+
   Expression* GetDestructuringDefaultValue(Expression** target);
   void BuildDestructuringArrayAssignment(
       ArrayLiteral* pattern, Token::Value op,
@@ -381,12 +384,13 @@ class BytecodeGenerator final : public AstVisitor<BytecodeGenerator> {
                                          Variable* variable);
   FeedbackSlot GetCachedStoreGlobalICSlot(LanguageMode language_mode,
                                           Variable* variable);
-  FeedbackSlot GetCachedCreateClosureSlot(FunctionLiteral* literal);
   FeedbackSlot GetCachedLoadICSlot(const Expression* expr,
                                    const AstRawString* name);
   FeedbackSlot GetCachedStoreICSlot(const Expression* expr,
                                     const AstRawString* name);
   FeedbackSlot GetDummyCompareICSlot();
+
+  int GetCachedCreateClosureSlot(FunctionLiteral* literal);
 
   void AddToEagerLiteralsIfEager(FunctionLiteral* literal);
 

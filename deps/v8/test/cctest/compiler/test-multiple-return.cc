@@ -118,14 +118,14 @@ Node* ToInt32(RawMachineAssembler& m, MachineType type, Node* a) {
   }
 }
 
-std::unique_ptr<wasm::NativeModule> AllocateNativeModule(Isolate* isolate,
+std::shared_ptr<wasm::NativeModule> AllocateNativeModule(Isolate* isolate,
                                                          size_t code_size) {
   std::shared_ptr<wasm::WasmModule> module(new wasm::WasmModule());
   module->num_declared_functions = 1;
   // We have to add the code object to a NativeModule, because the
   // WasmCallDescriptor assumes that code is on the native heap and not
   // within a code object.
-  return isolate->wasm_engine()->code_manager()->NewNativeModule(
+  return isolate->wasm_engine()->NewNativeModule(
       isolate, wasm::kAllWasmFeatures, code_size, false, std::move(module));
 }
 
@@ -183,7 +183,7 @@ void TestReturnMultipleValues(MachineType type) {
         if (i % 4 == 0) sign = -sign;
       }
 
-      std::unique_ptr<wasm::NativeModule> module = AllocateNativeModule(
+      std::shared_ptr<wasm::NativeModule> module = AllocateNativeModule(
           handles.main_isolate(), code->raw_instruction_size());
       byte* code_start =
           module->AddCodeForTesting(code)->instructions().start();
@@ -272,7 +272,7 @@ void ReturnLastValue(MachineType type) {
             AssemblerOptions::Default(handles.main_isolate()), m.Export())
             .ToHandleChecked();
 
-    std::unique_ptr<wasm::NativeModule> module = AllocateNativeModule(
+    std::shared_ptr<wasm::NativeModule> module = AllocateNativeModule(
         handles.main_isolate(), code->raw_instruction_size());
     byte* code_start = module->AddCodeForTesting(code)->instructions().start();
 
@@ -333,7 +333,7 @@ void ReturnSumOfReturns(MachineType type) {
             AssemblerOptions::Default(handles.main_isolate()), m.Export())
             .ToHandleChecked();
 
-    std::unique_ptr<wasm::NativeModule> module = AllocateNativeModule(
+    std::shared_ptr<wasm::NativeModule> module = AllocateNativeModule(
         handles.main_isolate(), code->raw_instruction_size());
     byte* code_start = module->AddCodeForTesting(code)->instructions().start();
 

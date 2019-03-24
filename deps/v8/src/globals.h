@@ -76,7 +76,7 @@ namespace internal {
 constexpr int kStackSpaceRequiredForCompilation = 40;
 
 // Determine whether double field unboxing feature is enabled.
-#if V8_TARGET_ARCH_64_BIT
+#if V8_TARGET_ARCH_64_BIT && !defined(V8_COMPRESS_POINTERS)
 #define V8_DOUBLE_FIELDS_UNBOXING true
 #else
 #define V8_DOUBLE_FIELDS_UNBOXING false
@@ -134,13 +134,8 @@ constexpr int kIntptrSize = sizeof(intptr_t);
 constexpr int kUIntptrSize = sizeof(uintptr_t);
 constexpr int kSystemPointerSize = sizeof(void*);
 constexpr int kSystemPointerHexDigits = kSystemPointerSize == 4 ? 8 : 12;
-#if V8_TARGET_ARCH_X64 && V8_TARGET_ARCH_32_BIT
-constexpr int kRegisterSize = kSystemPointerSize + kSystemPointerSize;
-#else
-constexpr int kRegisterSize = kSystemPointerSize;
-#endif
-constexpr int kPCOnStackSize = kRegisterSize;
-constexpr int kFPOnStackSize = kRegisterSize;
+constexpr int kPCOnStackSize = kSystemPointerSize;
+constexpr int kFPOnStackSize = kSystemPointerSize;
 
 #if V8_TARGET_ARCH_X64 || V8_TARGET_ARCH_IA32
 constexpr int kElidedFrameSlots = kPCOnStackSize / kSystemPointerSize;
@@ -184,13 +179,7 @@ constexpr size_t kReservedCodeRangePages = 0;
 constexpr int kSystemPointerSizeLog2 = 2;
 constexpr intptr_t kIntptrSignBit = 0x80000000;
 constexpr uintptr_t kUintptrAllBitsSet = 0xFFFFFFFFu;
-#if V8_TARGET_ARCH_X64 && V8_TARGET_ARCH_32_BIT
-// x32 port also requires code range.
-constexpr bool kRequiresCodeRange = true;
-constexpr size_t kMaximalCodeRangeSize = 256 * MB;
-constexpr size_t kMinimumCodeRangeSize = 3 * MB;
-constexpr size_t kMinExpectedOSPageSize = 4 * KB;  // OS page.
-#elif V8_HOST_ARCH_PPC && V8_TARGET_ARCH_PPC && V8_OS_LINUX
+#if V8_HOST_ARCH_PPC && V8_TARGET_ARCH_PPC && V8_OS_LINUX
 constexpr bool kRequiresCodeRange = false;
 constexpr size_t kMaximalCodeRangeSize = 0 * MB;
 constexpr size_t kMinimumCodeRangeSize = 0 * MB;
@@ -211,28 +200,51 @@ constexpr size_t kReservedCodeRangePages = 0;
 
 STATIC_ASSERT(kSystemPointerSize == (1 << kSystemPointerSizeLog2));
 
+#ifdef V8_COMPRESS_POINTERS
+static_assert(
+    kSystemPointerSize == kInt64Size,
+    "Pointer compression can be enabled only for 64-bit architectures");
+
+constexpr int kTaggedSize = kInt32Size;
+constexpr int kTaggedSizeLog2 = 2;
+
+// These types define raw and atomic storage types for tagged values stored
+// on V8 heap.
+using Tagged_t = int32_t;
+using AtomicTagged_t = base::Atomic32;
+
+#else
+
 constexpr int kTaggedSize = kSystemPointerSize;
 constexpr int kTaggedSizeLog2 = kSystemPointerSizeLog2;
-STATIC_ASSERT(kTaggedSize == (1 << kTaggedSizeLog2));
 
 // These types define raw and atomic storage types for tagged values stored
 // on V8 heap.
 using Tagged_t = Address;
 using AtomicTagged_t = base::AtomicWord;
+
+#endif  // V8_COMPRESS_POINTERS
+
+// Defines whether the branchless or branchful implementation of pointer
+// decompression should be used.
+constexpr bool kUseBranchlessPtrDecompression = true;
+
+STATIC_ASSERT(kTaggedSize == (1 << kTaggedSizeLog2));
+
 using AsAtomicTagged = base::AsAtomicPointerImpl<AtomicTagged_t>;
 STATIC_ASSERT(sizeof(Tagged_t) == kTaggedSize);
 STATIC_ASSERT(sizeof(AtomicTagged_t) == kTaggedSize);
 
+STATIC_ASSERT(kTaggedSize == kApiTaggedSize);
+
 // TODO(ishell): use kTaggedSize or kSystemPointerSize instead.
+#ifndef V8_COMPRESS_POINTERS
 constexpr int kPointerSize = kSystemPointerSize;
 constexpr int kPointerSizeLog2 = kSystemPointerSizeLog2;
 STATIC_ASSERT(kPointerSize == (1 << kPointerSizeLog2));
-
-constexpr int kEmbedderDataSlotSize =
-#ifdef V8_COMPRESS_POINTERS
-    kTaggedSize +
 #endif
-    kTaggedSize;
+
+constexpr int kEmbedderDataSlotSize = kSystemPointerSize;
 
 constexpr int kEmbedderDataSlotSizeInTaggedSlots =
     kEmbedderDataSlotSize / kTaggedSize;
@@ -247,13 +259,8 @@ constexpr int kExternalAllocationSoftLimit =
 // migrated from new space to large object space. Takes double alignment into
 // account.
 //
-// Current value: Page::kAllocatableMemory (on 32-bit arch) - 512 (slack).
-#ifdef V8_HOST_ARCH_PPC
-// Reduced kMaxRegularHeapObjectSize due to larger page size(64k) on ppc64le
-constexpr int kMaxRegularHeapObjectSize = 327680;
-#else
-constexpr int kMaxRegularHeapObjectSize = 507136;
-#endif
+// Current value: half of the page size.
+constexpr int kMaxRegularHeapObjectSize = (1 << (kPageSizeBits - 1));
 
 constexpr int kBitsPerByte = 8;
 constexpr int kBitsPerByteLog2 = 3;
@@ -576,6 +583,7 @@ class MessageLocation;
 class ModuleScope;
 class Name;
 class NameDictionary;
+class NativeContext;
 class NewSpace;
 class NewLargeObjectSpace;
 class NumberDictionary;
@@ -661,7 +669,6 @@ typedef bool (*WeakSlotCallbackWithHeap)(Heap* heap, FullObjectSlot pointer);
 // NOTE: SpaceIterator depends on AllocationSpace enumeration values being
 // consecutive.
 enum AllocationSpace {
-  // TODO(v8:7464): Actually map this space's memory as read-only.
   RO_SPACE,    // Immortal, immovable and immutable objects,
   NEW_SPACE,   // Young generation semispaces for regular objects collected with
                // Scavenger.
@@ -674,11 +681,41 @@ enum AllocationSpace {
 
   FIRST_SPACE = RO_SPACE,
   LAST_SPACE = NEW_LO_SPACE,
+  FIRST_MUTABLE_SPACE = NEW_SPACE,
+  LAST_MUTABLE_SPACE = NEW_LO_SPACE,
   FIRST_GROWABLE_PAGED_SPACE = OLD_SPACE,
   LAST_GROWABLE_PAGED_SPACE = MAP_SPACE
 };
 constexpr int kSpaceTagSize = 4;
 STATIC_ASSERT(FIRST_SPACE == 0);
+
+enum class AllocationType : uint8_t {
+  kYoung,    // Regular object allocated in NEW_SPACE or NEW_LO_SPACE
+  kOld,      // Regular object allocated in OLD_SPACE or LO_SPACE
+  kCode,     // Code object allocated in CODE_SPACE or CODE_LO_SPACE
+  kMap,      // Map object allocated in MAP_SPACE
+  kReadOnly  // Object allocated in RO_SPACE
+};
+
+inline size_t hash_value(AllocationType kind) {
+  return static_cast<uint8_t>(kind);
+}
+
+inline std::ostream& operator<<(std::ostream& os, AllocationType kind) {
+  switch (kind) {
+    case AllocationType::kYoung:
+      return os << "Young";
+    case AllocationType::kOld:
+      return os << "Old";
+    case AllocationType::kCode:
+      return os << "Code";
+    case AllocationType::kMap:
+      return os << "Map";
+    case AllocationType::kReadOnly:
+      return os << "ReadOnly";
+  }
+  UNREACHABLE();
+}
 
 // TODO(ishell): review and rename kWordAligned to kTaggedAligned.
 enum AllocationAlignment { kWordAligned, kDoubleAligned, kDoubleUnaligned };
@@ -711,24 +748,6 @@ inline std::ostream& operator<<(std::ostream& os, WriteBarrierKind kind) {
   UNREACHABLE();
 }
 
-// A flag that indicates whether objects should be pretenured when
-// allocated (allocated directly into either the old generation or read-only
-// space), or not (allocated in the young generation if the object size and type
-// allows).
-enum PretenureFlag { NOT_TENURED, TENURED, TENURED_READ_ONLY };
-
-inline std::ostream& operator<<(std::ostream& os, const PretenureFlag& flag) {
-  switch (flag) {
-    case NOT_TENURED:
-      return os << "NotTenured";
-    case TENURED:
-      return os << "Tenured";
-    case TENURED_READ_ONLY:
-      return os << "TenuredReadOnly";
-  }
-  UNREACHABLE();
-}
-
 enum MinimumCapacity {
   USE_DEFAULT_MINIMUM_CAPACITY,
   USE_CUSTOM_MINIMUM_CAPACITY
@@ -754,7 +773,6 @@ enum VisitMode {
 enum NativesFlag {
   NOT_NATIVES_CODE,
   EXTENSION_CODE,
-  NATIVES_CODE,
   INSPECTOR_CODE
 };
 
@@ -765,44 +783,13 @@ enum ParseRestriction {
   ONLY_SINGLE_FUNCTION_LITERAL  // Only a single FunctionLiteral expression.
 };
 
-// A CodeDesc describes a buffer holding instructions and relocation
-// information. The instructions start at the beginning of the buffer
-// and grow forward, the relocation information starts at the end of
-// the buffer and grows backward.  A constant pool and a code comments
-// section may exist at the in this order at the end of the instructions.
-//
-//  │<--------------- buffer_size ----------------------------------->│
-//  │<---------------- instr_size ------------->│      │<-reloc_size->│
-//  │              │<-const pool->│             │      │              │
-//  │                             │<- comments->│      │              │
-//  ├───────────────────────────────────────────┼──────┼──────────────┤
-//  │ instructions │         data               │ free │  reloc info  │
-//  ├───────────────────────────────────────────┴──────┴──────────────┘
-//  buffer
-
-struct CodeDesc {
-  byte* buffer = nullptr;
-  int buffer_size = 0;
-  int instr_size = 0;
-  int reloc_size = 0;
-  int constant_pool_size = 0;
-  int code_comments_size = 0;
-  byte* unwinding_info = 0;
-  int unwinding_info_size = 0;
-  Assembler* origin = nullptr;
-  int constant_pool_offset() const {
-    return code_comments_offset() - constant_pool_size;
-  }
-  int code_comments_offset() const { return instr_size - code_comments_size; }
-};
-
 // State for inline cache call sites. Aliased as IC::State.
 enum InlineCacheState {
   // No feedback will be collected.
   NO_FEEDBACK,
   // Has never been executed.
   UNINITIALIZED,
-  // Has been executed but monomorhic state has been delayed.
+  // Has been executed but monomorphic state has been delayed.
   PREMONOMORPHIC,
   // Has been executed and only one receiver type has been seen.
   MONOMORPHIC,
@@ -843,7 +830,10 @@ enum WhereToStart { kStartAtReceiver, kStartAtPrototype };
 
 enum ResultSentinel { kNotFound = -1, kUnsupported = -2 };
 
-enum ShouldThrow { kThrowOnError, kDontThrow };
+enum ShouldThrow {
+  kThrowOnError = Internals::kThrowOnError,
+  kDontThrow = Internals::kDontThrow
+};
 
 // The Store Buffer (GC).
 typedef enum {
@@ -904,24 +894,24 @@ constexpr int kIeeeDoubleExponentWordOffset = 0;
     ::i::kHeapObjectTag))
 
 // OBJECT_POINTER_ALIGN returns the value aligned as a HeapObject pointer
-#define OBJECT_POINTER_ALIGN(value)                             \
-  (((value) + kObjectAlignmentMask) & ~kObjectAlignmentMask)
+#define OBJECT_POINTER_ALIGN(value) \
+  (((value) + ::i::kObjectAlignmentMask) & ~::i::kObjectAlignmentMask)
 
 // OBJECT_POINTER_PADDING returns the padding size required to align value
 // as a HeapObject pointer
 #define OBJECT_POINTER_PADDING(value) (OBJECT_POINTER_ALIGN(value) - (value))
 
 // POINTER_SIZE_ALIGN returns the value aligned as a system pointer.
-#define POINTER_SIZE_ALIGN(value)                               \
-  (((value) + kPointerAlignmentMask) & ~kPointerAlignmentMask)
+#define POINTER_SIZE_ALIGN(value) \
+  (((value) + ::i::kPointerAlignmentMask) & ~::i::kPointerAlignmentMask)
 
 // POINTER_SIZE_PADDING returns the padding size required to align value
 // as a system pointer.
 #define POINTER_SIZE_PADDING(value) (POINTER_SIZE_ALIGN(value) - (value))
 
 // CODE_POINTER_ALIGN returns the value aligned as a generated code segment.
-#define CODE_POINTER_ALIGN(value)                               \
-  (((value) + kCodeAlignmentMask) & ~kCodeAlignmentMask)
+#define CODE_POINTER_ALIGN(value) \
+  (((value) + ::i::kCodeAlignmentMask) & ~::i::kCodeAlignmentMask)
 
 // CODE_POINTER_PADDING returns the padding size required to align value
 // as a generated code segment.
@@ -929,8 +919,7 @@ constexpr int kIeeeDoubleExponentWordOffset = 0;
 
 // DOUBLE_POINTER_ALIGN returns the value algined for double pointers.
 #define DOUBLE_POINTER_ALIGN(value) \
-  (((value) + kDoubleAlignmentMask) & ~kDoubleAlignmentMask)
-
+  (((value) + ::i::kDoubleAlignmentMask) & ~::i::kDoubleAlignmentMask)
 
 // Defines hints about receiver values based on structural knowledge.
 enum class ConvertReceiverMode : unsigned {
@@ -1099,6 +1088,7 @@ enum VariableKind : uint8_t {
   NORMAL_VARIABLE,
   PARAMETER_VARIABLE,
   THIS_VARIABLE,
+  SLOPPY_BLOCK_FUNCTION_VARIABLE,
   SLOPPY_FUNCTION_NAME_VARIABLE
 };
 
@@ -1178,156 +1168,6 @@ enum MaybeAssignedFlag : uint8_t { kNotAssigned, kMaybeAssigned };
 
 enum ParseErrorType { kSyntaxError = 0, kReferenceError = 1 };
 
-enum FunctionKind : uint8_t {
-  kNormalFunction,
-  kArrowFunction,
-  kGeneratorFunction,
-  kConciseMethod,
-  kDerivedConstructor,
-  kBaseConstructor,
-  kGetterFunction,
-  kSetterFunction,
-  kAsyncFunction,
-  kModule,
-  kClassMembersInitializerFunction,
-
-  kDefaultBaseConstructor,
-  kDefaultDerivedConstructor,
-  kAsyncArrowFunction,
-  kAsyncConciseMethod,
-
-  kConciseGeneratorMethod,
-  kAsyncConciseGeneratorMethod,
-  kAsyncGeneratorFunction,
-  kLastFunctionKind = kAsyncGeneratorFunction,
-};
-
-inline bool IsArrowFunction(FunctionKind kind) {
-  return kind == FunctionKind::kArrowFunction ||
-         kind == FunctionKind::kAsyncArrowFunction;
-}
-
-inline bool IsModule(FunctionKind kind) {
-  return kind == FunctionKind::kModule;
-}
-
-inline bool IsAsyncGeneratorFunction(FunctionKind kind) {
-  return kind == FunctionKind::kAsyncGeneratorFunction ||
-         kind == FunctionKind::kAsyncConciseGeneratorMethod;
-}
-
-inline bool IsGeneratorFunction(FunctionKind kind) {
-  return kind == FunctionKind::kGeneratorFunction ||
-         kind == FunctionKind::kConciseGeneratorMethod ||
-         IsAsyncGeneratorFunction(kind);
-}
-
-inline bool IsAsyncFunction(FunctionKind kind) {
-  return kind == FunctionKind::kAsyncFunction ||
-         kind == FunctionKind::kAsyncArrowFunction ||
-         kind == FunctionKind::kAsyncConciseMethod ||
-         IsAsyncGeneratorFunction(kind);
-}
-
-inline bool IsResumableFunction(FunctionKind kind) {
-  return IsGeneratorFunction(kind) || IsAsyncFunction(kind) || IsModule(kind);
-}
-
-inline bool IsConciseMethod(FunctionKind kind) {
-  return kind == FunctionKind::kConciseMethod ||
-         kind == FunctionKind::kConciseGeneratorMethod ||
-         kind == FunctionKind::kAsyncConciseMethod ||
-         kind == FunctionKind::kAsyncConciseGeneratorMethod ||
-         kind == FunctionKind::kClassMembersInitializerFunction;
-}
-
-inline bool IsGetterFunction(FunctionKind kind) {
-  return kind == FunctionKind::kGetterFunction;
-}
-
-inline bool IsSetterFunction(FunctionKind kind) {
-  return kind == FunctionKind::kSetterFunction;
-}
-
-inline bool IsAccessorFunction(FunctionKind kind) {
-  return kind == FunctionKind::kGetterFunction ||
-         kind == FunctionKind::kSetterFunction;
-}
-
-inline bool IsDefaultConstructor(FunctionKind kind) {
-  return kind == FunctionKind::kDefaultBaseConstructor ||
-         kind == FunctionKind::kDefaultDerivedConstructor;
-}
-
-inline bool IsBaseConstructor(FunctionKind kind) {
-  return kind == FunctionKind::kBaseConstructor ||
-         kind == FunctionKind::kDefaultBaseConstructor;
-}
-
-inline bool IsDerivedConstructor(FunctionKind kind) {
-  return kind == FunctionKind::kDerivedConstructor ||
-         kind == FunctionKind::kDefaultDerivedConstructor;
-}
-
-
-inline bool IsClassConstructor(FunctionKind kind) {
-  return IsBaseConstructor(kind) || IsDerivedConstructor(kind);
-}
-
-inline bool IsClassMembersInitializerFunction(FunctionKind kind) {
-  return kind == FunctionKind::kClassMembersInitializerFunction;
-}
-
-inline bool IsConstructable(FunctionKind kind) {
-  if (IsAccessorFunction(kind)) return false;
-  if (IsConciseMethod(kind)) return false;
-  if (IsArrowFunction(kind)) return false;
-  if (IsGeneratorFunction(kind)) return false;
-  if (IsAsyncFunction(kind)) return false;
-  return true;
-}
-
-inline std::ostream& operator<<(std::ostream& os, FunctionKind kind) {
-  switch (kind) {
-    case FunctionKind::kNormalFunction:
-      return os << "NormalFunction";
-    case FunctionKind::kArrowFunction:
-      return os << "ArrowFunction";
-    case FunctionKind::kGeneratorFunction:
-      return os << "GeneratorFunction";
-    case FunctionKind::kConciseMethod:
-      return os << "ConciseMethod";
-    case FunctionKind::kDerivedConstructor:
-      return os << "DerivedConstructor";
-    case FunctionKind::kBaseConstructor:
-      return os << "BaseConstructor";
-    case FunctionKind::kGetterFunction:
-      return os << "GetterFunction";
-    case FunctionKind::kSetterFunction:
-      return os << "SetterFunction";
-    case FunctionKind::kAsyncFunction:
-      return os << "AsyncFunction";
-    case FunctionKind::kModule:
-      return os << "Module";
-    case FunctionKind::kClassMembersInitializerFunction:
-      return os << "ClassMembersInitializerFunction";
-    case FunctionKind::kDefaultBaseConstructor:
-      return os << "DefaultBaseConstructor";
-    case FunctionKind::kDefaultDerivedConstructor:
-      return os << "DefaultDerivedConstructor";
-    case FunctionKind::kAsyncArrowFunction:
-      return os << "AsyncArrowFunction";
-    case FunctionKind::kAsyncConciseMethod:
-      return os << "AsyncConciseMethod";
-    case FunctionKind::kConciseGeneratorMethod:
-      return os << "ConciseGeneratorMethod";
-    case FunctionKind::kAsyncConciseGeneratorMethod:
-      return os << "AsyncConciseGeneratorMethod";
-    case FunctionKind::kAsyncGeneratorFunction:
-      return os << "AsyncGeneratorFunction";
-  }
-  UNREACHABLE();
-}
 
 enum class InterpreterPushArgsMode : unsigned {
   kArrayFunction,
@@ -1363,7 +1203,7 @@ inline uint32_t ObjectHash(Address address) {
 // to a more generic type when we combine feedback.
 //
 //   kSignedSmall -> kSignedSmallInputs -> kNumber  -> kNumberOrOddball -> kAny
-//                                                     kString          -> kAny
+//                   kConsString                    -> kString          -> kAny
 //                                                     kBigInt          -> kAny
 //
 // Technically we wouldn't need the separation between the kNumber and the
@@ -1380,9 +1220,12 @@ class BinaryOperationFeedback {
     kSignedSmallInputs = 0x3,
     kNumber = 0x7,
     kNumberOrOddball = 0xF,
-    kString = 0x10,
-    kBigInt = 0x20,
-    kAny = 0x7F
+    kConsOneByteString = 0x10,
+    kConsTwoByteString = 0x20,
+    kConsString = kConsOneByteString | kConsTwoByteString,
+    kString = 0x70,
+    kBigInt = 0x100,
+    kAny = 0x3FF
   };
 };
 
@@ -1727,6 +1570,9 @@ enum class StubCallMode {
   kCallWasmRuntimeStub,
   kCallBuiltinPointer,
 };
+
+constexpr int kFunctionLiteralIdInvalid = -1;
+constexpr int kFunctionLiteralIdTopLevel = 0;
 
 }  // namespace internal
 }  // namespace v8

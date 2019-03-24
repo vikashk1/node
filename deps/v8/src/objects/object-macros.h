@@ -25,7 +25,7 @@
   const Type* operator->() const { return this; } \
                                                   \
  protected:                                       \
-  explicit inline Type(Address ptr);
+  explicit inline Type(Address ptr)
 
 #define OBJECT_CONSTRUCTORS_IMPL(Type, Super) \
   inline Type::Type(Address ptr) : Super(ptr) { SLOW_DCHECK(Is##Type()); }
@@ -80,38 +80,38 @@
 #define CAST_ACCESSOR(Type) \
   Type Type::cast(Object object) { return Type(object.ptr()); }
 
-#define INT_ACCESSORS(holder, name, offset)                         \
-  int holder::name() const { return READ_INT_FIELD(this, offset); } \
-  void holder::set_##name(int value) { WRITE_INT_FIELD(this, offset, value); }
+#define INT_ACCESSORS(holder, name, offset)                          \
+  int holder::name() const { return READ_INT_FIELD(*this, offset); } \
+  void holder::set_##name(int value) { WRITE_INT_FIELD(*this, offset, value); }
 
-#define INT32_ACCESSORS(holder, name, offset)                             \
-  int32_t holder::name() const { return READ_INT32_FIELD(this, offset); } \
-  void holder::set_##name(int32_t value) {                                \
-    WRITE_INT32_FIELD(this, offset, value);                               \
+#define INT32_ACCESSORS(holder, name, offset)                              \
+  int32_t holder::name() const { return READ_INT32_FIELD(*this, offset); } \
+  void holder::set_##name(int32_t value) {                                 \
+    WRITE_INT32_FIELD(*this, offset, value);                               \
   }
 
 #define RELAXED_INT32_ACCESSORS(holder, name, offset) \
   int32_t holder::name() const {                      \
-    return RELAXED_READ_INT32_FIELD(this, offset);    \
+    return RELAXED_READ_INT32_FIELD(*this, offset);   \
   }                                                   \
   void holder::set_##name(int32_t value) {            \
-    RELAXED_WRITE_INT32_FIELD(this, offset, value);   \
+    RELAXED_WRITE_INT32_FIELD(*this, offset, value);  \
   }
 
-#define UINT16_ACCESSORS(holder, name, offset)                              \
-  uint16_t holder::name() const { return READ_UINT16_FIELD(this, offset); } \
-  void holder::set_##name(int value) {                                      \
-    DCHECK_GE(value, 0);                                                    \
-    DCHECK_LE(value, static_cast<uint16_t>(-1));                            \
-    WRITE_UINT16_FIELD(this, offset, value);                                \
+#define UINT16_ACCESSORS(holder, name, offset)                               \
+  uint16_t holder::name() const { return READ_UINT16_FIELD(*this, offset); } \
+  void holder::set_##name(int value) {                                       \
+    DCHECK_GE(value, 0);                                                     \
+    DCHECK_LE(value, static_cast<uint16_t>(-1));                             \
+    WRITE_UINT16_FIELD(*this, offset, value);                                \
   }
 
-#define UINT8_ACCESSORS(holder, name, offset)                             \
-  uint8_t holder::name() const { return READ_UINT8_FIELD(this, offset); } \
-  void holder::set_##name(int value) {                                    \
-    DCHECK_GE(value, 0);                                                  \
-    DCHECK_LE(value, static_cast<uint8_t>(-1));                           \
-    WRITE_UINT8_FIELD(this, offset, value);                               \
+#define UINT8_ACCESSORS(holder, name, offset)                              \
+  uint8_t holder::name() const { return READ_UINT8_FIELD(*this, offset); } \
+  void holder::set_##name(int value) {                                     \
+    DCHECK_GE(value, 0);                                                   \
+    DCHECK_LE(value, static_cast<uint8_t>(-1));                            \
+    WRITE_UINT8_FIELD(*this, offset, value);                               \
   }
 
 #define ACCESSORS_CHECKED2(holder, name, type, offset, get_condition, \
@@ -240,7 +240,7 @@
     RELAXED_WRITE_INT16_FIELD(*this, offset, value);  \
   }
 
-#define FIELD_ADDR(p, offset) ((p)->ptr() + offset - kHeapObjectTag)
+#define FIELD_ADDR(p, offset) ((p).ptr() + offset - kHeapObjectTag)
 
 #define READ_FIELD(p, offset) (*ObjectSlot(FIELD_ADDR(p, offset)))
 
@@ -278,21 +278,21 @@
 
 #define WRITE_BARRIER(object, offset, value)                        \
   do {                                                              \
-    DCHECK_NOT_NULL(Heap::FromWritableHeapObject(object));          \
+    DCHECK_NOT_NULL(GetHeapFromWritableObject(object));             \
     MarkingBarrier(object, (object)->RawField(offset), value);      \
     GenerationalBarrier(object, (object)->RawField(offset), value); \
   } while (false)
 
 #define WEAK_WRITE_BARRIER(object, offset, value)                            \
   do {                                                                       \
-    DCHECK_NOT_NULL(Heap::FromWritableHeapObject(object));                   \
+    DCHECK_NOT_NULL(GetHeapFromWritableObject(object));                      \
     MarkingBarrier(object, (object)->RawMaybeWeakField(offset), value);      \
     GenerationalBarrier(object, (object)->RawMaybeWeakField(offset), value); \
   } while (false)
 
 #define CONDITIONAL_WRITE_BARRIER(object, offset, value, mode)        \
   do {                                                                \
-    DCHECK_NOT_NULL(Heap::FromWritableHeapObject(object));            \
+    DCHECK_NOT_NULL(GetHeapFromWritableObject(object));               \
     if (mode != SKIP_WRITE_BARRIER) {                                 \
       if (mode == UPDATE_WRITE_BARRIER) {                             \
         MarkingBarrier(object, (object)->RawField(offset), value);    \
@@ -303,7 +303,7 @@
 
 #define CONDITIONAL_WEAK_WRITE_BARRIER(object, offset, value, mode)            \
   do {                                                                         \
-    DCHECK_NOT_NULL(Heap::FromWritableHeapObject(object));                     \
+    DCHECK_NOT_NULL(GetHeapFromWritableObject(object));                        \
     if (mode != SKIP_WRITE_BARRIER) {                                          \
       if (mode == UPDATE_WRITE_BARRIER) {                                      \
         MarkingBarrier(object, (object)->RawMaybeWeakField(offset), value);    \
@@ -323,39 +323,9 @@
 #define WRITE_INT_FIELD(p, offset, value) \
   (*reinterpret_cast<int*>(FIELD_ADDR(p, offset)) = value)
 
-#define ACQUIRE_READ_INTPTR_FIELD(p, offset) \
-  static_cast<intptr_t>(base::Acquire_Load(  \
-      reinterpret_cast<const base::AtomicWord*>(FIELD_ADDR(p, offset))))
-
 #define ACQUIRE_READ_INT32_FIELD(p, offset) \
   static_cast<int32_t>(base::Acquire_Load(  \
       reinterpret_cast<const base::Atomic32*>(FIELD_ADDR(p, offset))))
-
-#define RELAXED_READ_INTPTR_FIELD(p, offset) \
-  static_cast<intptr_t>(base::Relaxed_Load(  \
-      reinterpret_cast<const base::AtomicWord*>(FIELD_ADDR(p, offset))))
-
-#define READ_INTPTR_FIELD(p, offset) \
-  (*reinterpret_cast<const intptr_t*>(FIELD_ADDR(p, offset)))
-
-#define RELEASE_WRITE_INTPTR_FIELD(p, offset, value)              \
-  base::Release_Store(                                            \
-      reinterpret_cast<base::AtomicWord*>(FIELD_ADDR(p, offset)), \
-      static_cast<base::AtomicWord>(value));
-
-#define RELAXED_WRITE_INTPTR_FIELD(p, offset, value)              \
-  base::Relaxed_Store(                                            \
-      reinterpret_cast<base::AtomicWord*>(FIELD_ADDR(p, offset)), \
-      static_cast<base::AtomicWord>(value));
-
-#define WRITE_INTPTR_FIELD(p, offset, value) \
-  (*reinterpret_cast<intptr_t*>(FIELD_ADDR(p, offset)) = value)
-
-#define READ_UINTPTR_FIELD(p, offset) \
-  (*reinterpret_cast<const uintptr_t*>(FIELD_ADDR(p, offset)))
-
-#define WRITE_UINTPTR_FIELD(p, offset, value) \
-  (*reinterpret_cast<uintptr_t*>(FIELD_ADDR(p, offset)) = value)
 
 #define READ_UINT8_FIELD(p, offset) \
   (*reinterpret_cast<const uint8_t*>(FIELD_ADDR(p, offset)))
@@ -439,17 +409,51 @@
 #define WRITE_FLOAT_FIELD(p, offset, value) \
   (*reinterpret_cast<float*>(FIELD_ADDR(p, offset)) = value)
 
+// TODO(ishell, v8:8875): When pointer compression is enabled 8-byte size fields
+// (external pointers, doubles and BigInt data) are only kTaggedSize aligned so
+// we have to use unaligned pointer friendly way of accessing them in order to
+// avoid undefined behavior in C++ code.
+#ifdef V8_COMPRESS_POINTERS
+
+#define READ_INTPTR_FIELD(p, offset) \
+  ReadUnalignedValue<intptr_t>(FIELD_ADDR(p, offset))
+
+#define WRITE_INTPTR_FIELD(p, offset, value) \
+  WriteUnalignedValue<intptr_t>(FIELD_ADDR(p, offset), value)
+
+#define READ_UINTPTR_FIELD(p, offset) \
+  ReadUnalignedValue<uintptr_t>(FIELD_ADDR(p, offset))
+
+#define WRITE_UINTPTR_FIELD(p, offset, value) \
+  WriteUnalignedValue<uintptr_t>(FIELD_ADDR(p, offset), value)
+
+#define READ_UINT64_FIELD(p, offset) \
+  ReadUnalignedValue<uint64_t>(FIELD_ADDR(p, offset))
+
+#define WRITE_UINT64_FIELD(p, offset, value) \
+  WriteUnalignedValue<uint64_t>(FIELD_ADDR(p, offset), value)
+
+#else  // V8_COMPRESS_POINTERS
+
+#define READ_INTPTR_FIELD(p, offset) \
+  (*reinterpret_cast<const intptr_t*>(FIELD_ADDR(p, offset)))
+
+#define WRITE_INTPTR_FIELD(p, offset, value) \
+  (*reinterpret_cast<intptr_t*>(FIELD_ADDR(p, offset)) = value)
+
+#define READ_UINTPTR_FIELD(p, offset) \
+  (*reinterpret_cast<const uintptr_t*>(FIELD_ADDR(p, offset)))
+
+#define WRITE_UINTPTR_FIELD(p, offset, value) \
+  (*reinterpret_cast<uintptr_t*>(FIELD_ADDR(p, offset)) = value)
+
 #define READ_UINT64_FIELD(p, offset) \
   (*reinterpret_cast<const uint64_t*>(FIELD_ADDR(p, offset)))
 
 #define WRITE_UINT64_FIELD(p, offset, value) \
   (*reinterpret_cast<uint64_t*>(FIELD_ADDR(p, offset)) = value)
 
-#define READ_INT64_FIELD(p, offset) \
-  (*reinterpret_cast<const int64_t*>(FIELD_ADDR(p, offset)))
-
-#define WRITE_INT64_FIELD(p, offset, value) \
-  (*reinterpret_cast<int64_t*>(FIELD_ADDR(p, offset)) = value)
+#endif  // V8_COMPRESS_POINTERS
 
 #define READ_BYTE_FIELD(p, offset) \
   (*reinterpret_cast<const byte*>(FIELD_ADDR(p, offset)))

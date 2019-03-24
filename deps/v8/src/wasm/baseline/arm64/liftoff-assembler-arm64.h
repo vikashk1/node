@@ -206,9 +206,10 @@ void LiftoffAssembler::LoadTaggedPointer(Register dst, Register src_addr,
                                          Register offset_reg,
                                          uint32_t offset_imm,
                                          LiftoffRegList pinned) {
-  STATIC_ASSERT(kTaggedSize == kInt64Size);
-  Load(LiftoffRegister(dst), src_addr, offset_reg, offset_imm,
-       LoadType::kI64Load, pinned);
+  UseScratchRegisterScope temps(this);
+  MemOperand src_op =
+      liftoff::GetMemOp(this, &temps, src_addr, offset_reg, offset_imm);
+  LoadTaggedPointerField(dst, src_op);
 }
 
 void LiftoffAssembler::Load(LiftoffRegister dst, Register src_addr,
@@ -344,12 +345,20 @@ void LiftoffAssembler::Spill(uint32_t index, WasmValue value) {
   CPURegister src = CPURegister::no_reg();
   switch (value.type()) {
     case kWasmI32:
-      src = temps.AcquireW();
-      Mov(src.W(), value.to_i32());
+      if (value.to_i32() == 0) {
+        src = wzr;
+      } else {
+        src = temps.AcquireW();
+        Mov(src.W(), value.to_i32());
+      }
       break;
     case kWasmI64:
-      src = temps.AcquireX();
-      Mov(src.X(), value.to_i64());
+      if (value.to_i64() == 0) {
+        src = xzr;
+      } else {
+        src = temps.AcquireX();
+        Mov(src.X(), value.to_i64());
+      }
       break;
     default:
       // We do not track f32 and f64 constants, hence they are unreachable.
@@ -1025,7 +1034,7 @@ void LiftoffStackSlots::Construct() {
         asm_->Poke(liftoff::GetRegFromType(slot.src_.reg(), slot.src_.type()),
                    poke_offset);
         break;
-      case LiftoffAssembler::VarState::KIntConst:
+      case LiftoffAssembler::VarState::kIntConst:
         DCHECK(slot.src_.type() == kWasmI32 || slot.src_.type() == kWasmI64);
         if (slot.src_.i32_const() == 0) {
           Register zero_reg = slot.src_.type() == kWasmI32 ? wzr : xzr;

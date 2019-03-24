@@ -23,6 +23,28 @@
 namespace v8 {
 namespace internal {
 
+// This struct contains a set of flags that can be modified from multiple
+// threads at runtime unlike the normal FLAG_-like flags which are not modified
+// after V8 instance is initialized.
+
+struct TracingFlags {
+  static V8_EXPORT_PRIVATE std::atomic_uint runtime_stats;
+  static V8_EXPORT_PRIVATE std::atomic_uint gc_stats;
+  static V8_EXPORT_PRIVATE std::atomic_uint ic_stats;
+
+  static bool is_runtime_stats_enabled() {
+    return runtime_stats.load(std::memory_order_relaxed) != 0;
+  }
+
+  static bool is_gc_stats_enabled() {
+    return gc_stats.load(std::memory_order_relaxed) != 0;
+  }
+
+  static bool is_ic_stats_enabled() {
+    return ic_stats.load(std::memory_order_relaxed) != 0;
+  }
+};
+
 // StatsCounters is an interface for plugging into external
 // counters for monitoring.  Counters can be looked up and
 // manipulated by name.
@@ -723,10 +745,10 @@ class RuntimeCallTimer final {
   V(Context_New)                                           \
   V(Context_NewRemoteContext)                              \
   V(DataView_New)                                          \
-  V(Date_DateTimeConfigurationChangeNotification)          \
   V(Date_New)                                              \
   V(Date_NumberValue)                                      \
   V(Debug_Call)                                            \
+  V(debug_GetPrivateFields)                                \
   V(Error_New)                                             \
   V(External_New)                                          \
   V(Float32Array_New)                                      \
@@ -742,6 +764,8 @@ class RuntimeCallTimer final {
   V(Int16Array_New)                                        \
   V(Int32Array_New)                                        \
   V(Int8Array_New)                                         \
+  V(Isolate_DateTimeConfigurationChangeNotification)       \
+  V(Isolate_LocaleConfigurationChangeNotification)         \
   V(JSON_Parse)                                            \
   V(JSON_Stringify)                                        \
   V(Map_AsArray)                                           \
@@ -839,6 +863,7 @@ class RuntimeCallTimer final {
   V(SymbolObject_New)                                      \
   V(SymbolObject_SymbolValue)                              \
   V(SyntaxError_New)                                       \
+  V(TracedGlobal_New)                                      \
   V(TryCatch_StackTrace)                                   \
   V(TypeError_New)                                         \
   V(Uint16Array_New)                                       \
@@ -879,6 +904,7 @@ class RuntimeCallTimer final {
   V(CompileBackgroundRewriteReturnResult)      \
   V(CompileBackgroundScopeAnalysis)            \
   V(CompileBackgroundScript)                   \
+  V(CompileCollectSourcePositions)             \
   V(CompileDeserialize)                        \
   V(CompileEnqueueOnDispatcher)                \
   V(CompileEval)                               \
@@ -998,6 +1024,7 @@ class RuntimeCallTimer final {
   V(LoadIC_StringWrapperLength)                   \
   V(StoreGlobalIC_SlowStub)                       \
   V(StoreGlobalIC_StoreScriptContextField)        \
+  V(StoreGlobalIC_Premonomorphic)                 \
   V(StoreIC_HandlerCacheHit_Accessor)             \
   V(StoreIC_NonReceiver)                          \
   V(StoreIC_Premonomorphic)                       \
@@ -1127,7 +1154,8 @@ class WorkerThreadRuntimeCallStatsScope final {
 
 #define CHANGE_CURRENT_RUNTIME_COUNTER(runtime_call_stats, counter_id) \
   do {                                                                 \
-    if (V8_UNLIKELY(FLAG_runtime_stats) && runtime_call_stats) {       \
+    if (V8_UNLIKELY(TracingFlags::is_runtime_stats_enabled()) &&       \
+        runtime_call_stats) {                                          \
       runtime_call_stats->CorrectCurrentCounterId(counter_id);         \
     }                                                                  \
   } while (false)
@@ -1149,7 +1177,9 @@ class RuntimeCallTimerScope {
                                RuntimeCallCounterId counter_id);
   inline RuntimeCallTimerScope(RuntimeCallStats* stats,
                                RuntimeCallCounterId counter_id) {
-    if (V8_LIKELY(!FLAG_runtime_stats || stats == nullptr)) return;
+    if (V8_LIKELY(!TracingFlags::is_runtime_stats_enabled() ||
+                  stats == nullptr))
+      return;
     stats_ = stats;
     stats_->Enter(&timer_, counter_id);
   }
@@ -1192,10 +1222,10 @@ class RuntimeCallTimerScope {
   HR(scavenge_reason, V8.GCScavengeReason, 0, 21, 22)                          \
   HR(young_generation_handling, V8.GCYoungGenerationHandling, 0, 2, 3)         \
   /* Asm/Wasm. */                                                              \
-  HR(wasm_functions_per_asm_module, V8.WasmFunctionsPerModule.asm, 1, 100000,  \
+  HR(wasm_functions_per_asm_module, V8.WasmFunctionsPerModule.asm, 1, 1000000, \
      51)                                                                       \
   HR(wasm_functions_per_wasm_module, V8.WasmFunctionsPerModule.wasm, 1,        \
-     100000, 51)                                                               \
+     1000000, 51)                                                              \
   HR(array_buffer_big_allocations, V8.ArrayBufferLargeAllocations, 0, 4096,    \
      13)                                                                       \
   HR(array_buffer_new_size_failures, V8.ArrayBufferNewSizeFailures, 0, 4096,   \
@@ -1229,9 +1259,17 @@ class RuntimeCallTimerScope {
   HR(wasm_memory_allocation_result, V8.WasmMemoryAllocationResult, 0, 3, 4)    \
   HR(wasm_address_space_usage_mb, V8.WasmAddressSpaceUsageMiB, 0, 1 << 20,     \
      128)                                                                      \
-  HR(wasm_module_code_size_mb, V8.WasmModuleCodeSizeMiB, 0, 1024, 64)
+  /* code size of live modules, collected on GC */                             \
+  HR(wasm_module_code_size_mb, V8.WasmModuleCodeSizeMiB, 0, 1024, 64)          \
+  /* code size of modules after baseline compilation */                        \
+  HR(wasm_module_code_size_mb_after_baseline,                                  \
+     V8.WasmModuleCodeSizeBaselineMiB, 0, 1024, 64)                            \
+  /* code size of modules after top-tier compilation */                        \
+  HR(wasm_module_code_size_mb_after_top_tier, V8.WasmModuleCodeSizeTopTierMiB, \
+     0, 1024, 64)
 
 #define HISTOGRAM_TIMER_LIST(HT)                                               \
+  /* Timer histograms, not thread safe: HT(name, caption, max, unit) */        \
   /* Garbage collection timers. */                                             \
   HT(gc_context, V8.GCContext, 10000,                                          \
      MILLISECOND) /* GC context cleanup time */                                \
@@ -1244,6 +1282,8 @@ class RuntimeCallTimerScope {
   HT(gc_low_memory_notification, V8.GCLowMemoryNotification, 10000,            \
      MILLISECOND)                                                              \
   /* Compilation times. */                                                     \
+  HT(collect_source_positions, V8.CollectSourcePositions, 1000000,             \
+     MICROSECOND)                                                              \
   HT(compile, V8.CompileMicroSeconds, 1000000, MICROSECOND)                    \
   HT(compile_eval, V8.CompileEvalMicroSeconds, 1000000, MICROSECOND)           \
   /* Serialization as part of compilation (code caching) */                    \
@@ -1258,11 +1298,10 @@ class RuntimeCallTimerScope {
   HT(asm_wasm_translation_time, V8.AsmWasmTranslationMicroSeconds, 1000000,    \
      MICROSECOND)                                                              \
   HT(wasm_lazy_compilation_time, V8.WasmLazyCompilationMicroSeconds, 1000000,  \
-     MICROSECOND)                                                              \
-  HT(wasm_execution_time, V8.WasmExecutionTimeMicroSeconds, 10000000,          \
      MICROSECOND)
 
 #define TIMED_HISTOGRAM_LIST(HT)                                               \
+  /* Timer histograms, thread safe: HT(name, caption, max, unit) */            \
   /* Garbage collection timers. */                                             \
   HT(gc_compactor, V8.GCCompactor, 10000, MILLISECOND)                         \
   HT(gc_compactor_background, V8.GCCompactorBackground, 10000, MILLISECOND)    \
@@ -1323,9 +1362,7 @@ class RuntimeCallTimerScope {
   HT(compile_script_on_background,                                             \
      V8.CompileScriptMicroSeconds.BackgroundThread, 1000000, MICROSECOND)      \
   HT(compile_function_on_background,                                           \
-     V8.CompileFunctionMicroSeconds.BackgroundThread, 1000000, MICROSECOND)    \
-  HT(gc_parallel_task_latency, V8.GC.ParallelTaskLatencyMicroSeconds, 1000000, \
-     MICROSECOND)
+     V8.CompileFunctionMicroSeconds.BackgroundThread, 1000000, MICROSECOND)
 
 #define AGGREGATABLE_HISTOGRAM_TIMER_LIST(AHT) \
   AHT(compile_lazy, V8.CompileLazyMicroSeconds)
@@ -1424,7 +1461,6 @@ class RuntimeCallTimerScope {
   SC(fast_new_closure_total, V8.FastNewClosureTotal)                           \
   SC(string_add_runtime, V8.StringAddRuntime)                                  \
   SC(string_add_native, V8.StringAddNative)                                    \
-  SC(string_add_runtime_ext_to_one_byte, V8.StringAddRuntimeExtToOneByte)      \
   SC(sub_string_runtime, V8.SubStringRuntime)                                  \
   SC(sub_string_native, V8.SubStringNative)                                    \
   SC(regexp_entry_runtime, V8.RegExpEntryRuntime)                              \
@@ -1668,7 +1704,7 @@ void HistogramTimer::Stop() {
 
 RuntimeCallTimerScope::RuntimeCallTimerScope(Isolate* isolate,
                                              RuntimeCallCounterId counter_id) {
-  if (V8_LIKELY(!FLAG_runtime_stats)) return;
+  if (V8_LIKELY(!TracingFlags::is_runtime_stats_enabled())) return;
   stats_ = isolate->counters()->runtime_call_stats();
   stats_->Enter(&timer_, counter_id);
 }

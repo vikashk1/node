@@ -350,8 +350,8 @@ Handle<WeakFixedArray> TransitionArray::GrowPrototypeTransitionArray(
   new_capacity = Min(kMaxCachedPrototypeTransitions, new_capacity);
   DCHECK_GT(new_capacity, capacity);
   int grow_by = new_capacity - capacity;
-  array =
-      isolate->factory()->CopyWeakFixedArrayAndGrow(array, grow_by, TENURED);
+  array = isolate->factory()->CopyWeakFixedArrayAndGrow(array, grow_by,
+                                                        AllocationType::kOld);
   if (capacity < 0) {
     // There was no prototype transitions array before, so the size
     // couldn't be copied. Initialize it explicitly.
@@ -688,6 +688,24 @@ void TransitionArray::Sort() {
     SetRawTarget(j + 1, target);
   }
   DCHECK(IsSortedNoDuplicates());
+}
+
+bool TransitionsAccessor::HasIntegrityLevelTransitionTo(
+    Map to, Symbol* out_symbol, PropertyAttributes* out_integrity_level) {
+  ReadOnlyRoots roots(isolate_);
+  if (SearchSpecial(roots.frozen_symbol()) == to) {
+    if (out_integrity_level) *out_integrity_level = FROZEN;
+    if (out_symbol) *out_symbol = roots.frozen_symbol();
+  } else if (SearchSpecial(roots.sealed_symbol()) == to) {
+    if (out_integrity_level) *out_integrity_level = SEALED;
+    if (out_symbol) *out_symbol = roots.sealed_symbol();
+  } else if (SearchSpecial(roots.nonextensible_symbol()) == to) {
+    if (out_integrity_level) *out_integrity_level = NONE;
+    if (out_symbol) *out_symbol = roots.nonextensible_symbol();
+  } else {
+    return false;
+  }
+  return true;
 }
 
 }  // namespace internal

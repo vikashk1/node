@@ -7,7 +7,8 @@
 
 #include "src/objects/templates.h"
 
-#include "src/heap/heap-inl.h"
+#include "src/heap/heap-write-barrier-inl.h"
+#include "src/objects/oddball.h"
 #include "src/objects/shared-function-info-inl.h"
 
 // Has to be the last include (doesn't have include guards):
@@ -25,7 +26,7 @@ NEVER_READ_ONLY_SPACE_IMPL(TemplateInfo)
 
 ACCESSORS(TemplateInfo, tag, Object, kTagOffset)
 ACCESSORS(TemplateInfo, serial_number, Object, kSerialNumberOffset)
-SMI_ACCESSORS(TemplateInfo, number_of_properties, kNumberOfProperties)
+SMI_ACCESSORS(TemplateInfo, number_of_properties, kNumberOfPropertiesOffset)
 ACCESSORS(TemplateInfo, property_list, Object, kPropertyListOffset)
 ACCESSORS(TemplateInfo, property_accessors, Object, kPropertyAccessorsOffset)
 

@@ -9,6 +9,7 @@
 
 #include "src/conversions-inl.h"
 #include "src/handles-inl.h"
+#include "src/hash-seed-inl.h"
 #include "src/heap/factory.h"
 #include "src/objects/name-inl.h"
 #include "src/objects/smi-inl.h"
@@ -25,12 +26,12 @@ INT32_ACCESSORS(String, length, kLengthOffset)
 
 int String::synchronized_length() const {
   return base::AsAtomic32::Acquire_Load(
-      reinterpret_cast<const int32_t*>(FIELD_ADDR(this, kLengthOffset)));
+      reinterpret_cast<const int32_t*>(FIELD_ADDR(*this, kLengthOffset)));
 }
 
 void String::synchronized_set_length(int value) {
   base::AsAtomic32::Release_Store(
-      reinterpret_cast<int32_t*>(FIELD_ADDR(this, kLengthOffset)), value);
+      reinterpret_cast<int32_t*>(FIELD_ADDR(*this, kLengthOffset)), value);
 }
 
 OBJECT_CONSTRUCTORS_IMPL(String, Name)
@@ -78,11 +79,6 @@ bool StringShape::IsInternalized() {
   STATIC_ASSERT(kNotInternalizedTag != 0);
   return (type_ & (kIsNotStringMask | kIsNotInternalizedMask)) ==
          (kStringTag | kInternalizedTag);
-}
-
-bool StringShape::HasOnlyOneByteChars() {
-  return (type_ & kStringEncodingMask) == kOneByteStringTag ||
-         (type_ & kOneByteDataHintMask) == kOneByteDataHintTag;
 }
 
 bool StringShape::IsCons() {
@@ -179,12 +175,6 @@ bool String::IsOneByteRepresentationUnderneath(String string) {
   }
 }
 
-bool String::HasOnlyOneByteChars() {
-  uint32_t type = map()->instance_type();
-  return (type & kOneByteDataHintMask) == kOneByteDataHintTag ||
-         IsOneByteRepresentation();
-}
-
 uc32 FlatStringReader::Get(int index) {
   if (is_one_byte_) {
     return Get<uint8_t>(index);
@@ -243,7 +233,7 @@ class SeqOneByteSubStringKey : public StringTableKey {
     // We have to set the hash later.
     DisallowHeapAllocation no_gc;
     uint32_t hash = StringHasher::HashSequentialString(
-        string->GetChars(no_gc) + from, length, isolate->heap()->HashSeed());
+        string->GetChars(no_gc) + from, length, HashSeed(isolate));
     set_hash_field(hash);
 
     DCHECK_LE(0, length_);
@@ -313,13 +303,13 @@ bool String::Equals(Isolate* isolate, Handle<String> one, Handle<String> two) {
 }
 
 Handle<String> String::Flatten(Isolate* isolate, Handle<String> string,
-                               PretenureFlag pretenure) {
+                               AllocationType allocation) {
   if (string->IsConsString()) {
     Handle<ConsString> cons = Handle<ConsString>::cast(string);
     if (cons->IsFlat()) {
       string = handle(cons->first(), isolate);
     } else {
-      return SlowFlatten(isolate, cons, pretenure);
+      return SlowFlatten(isolate, cons, allocation);
     }
   }
   if (string->IsThinString()) {
@@ -382,7 +372,7 @@ String String::GetUnderlying() {
   STATIC_ASSERT(static_cast<int>(ConsString::kFirstOffset) ==
                 static_cast<int>(ThinString::kActualOffset));
   const int kUnderlyingOffset = SlicedString::kParentOffset;
-  return String::cast(READ_FIELD(this, kUnderlyingOffset));
+  return String::cast(READ_FIELD(*this, kUnderlyingOffset));
 }
 
 template <class Visitor>
@@ -467,17 +457,17 @@ uint32_t String::ToValidIndex(Object number) {
 
 uint16_t SeqOneByteString::SeqOneByteStringGet(int index) {
   DCHECK(index >= 0 && index < length());
-  return READ_BYTE_FIELD(this, kHeaderSize + index * kCharSize);
+  return READ_BYTE_FIELD(*this, kHeaderSize + index * kCharSize);
 }
 
 void SeqOneByteString::SeqOneByteStringSet(int index, uint16_t value) {
   DCHECK(index >= 0 && index < length() && value <= kMaxOneByteCharCode);
-  WRITE_BYTE_FIELD(this, kHeaderSize + index * kCharSize,
+  WRITE_BYTE_FIELD(*this, kHeaderSize + index * kCharSize,
                    static_cast<byte>(value));
 }
 
 Address SeqOneByteString::GetCharsAddress() {
-  return FIELD_ADDR(this, kHeaderSize);
+  return FIELD_ADDR(*this, kHeaderSize);
 }
 
 uint8_t* SeqOneByteString::GetChars(const DisallowHeapAllocation& no_gc) {
@@ -486,22 +476,22 @@ uint8_t* SeqOneByteString::GetChars(const DisallowHeapAllocation& no_gc) {
 }
 
 Address SeqTwoByteString::GetCharsAddress() {
-  return FIELD_ADDR(this, kHeaderSize);
+  return FIELD_ADDR(*this, kHeaderSize);
 }
 
 uc16* SeqTwoByteString::GetChars(const DisallowHeapAllocation& no_gc) {
   USE(no_gc);
-  return reinterpret_cast<uc16*>(FIELD_ADDR(this, kHeaderSize));
+  return reinterpret_cast<uc16*>(FIELD_ADDR(*this, kHeaderSize));
 }
 
 uint16_t SeqTwoByteString::SeqTwoByteStringGet(int index) {
   DCHECK(index >= 0 && index < length());
-  return READ_UINT16_FIELD(this, kHeaderSize + index * kShortSize);
+  return READ_UINT16_FIELD(*this, kHeaderSize + index * kShortSize);
 }
 
 void SeqTwoByteString::SeqTwoByteStringSet(int index, uint16_t value) {
   DCHECK(index >= 0 && index < length());
-  WRITE_UINT16_FIELD(this, kHeaderSize + index * kShortSize, value);
+  WRITE_UINT16_FIELD(*this, kHeaderSize + index * kShortSize, value);
 }
 
 int SeqTwoByteString::SeqTwoByteStringSize(InstanceType instance_type) {
@@ -526,7 +516,7 @@ void SlicedString::set_parent(Isolate* isolate, String parent,
 SMI_ACCESSORS(SlicedString, offset, kOffsetOffset)
 
 String ConsString::first() {
-  return String::cast(READ_FIELD(this, kFirstOffset));
+  return String::cast(READ_FIELD(*this, kFirstOffset));
 }
 
 Object ConsString::unchecked_first() { return READ_FIELD(*this, kFirstOffset); }
@@ -551,7 +541,7 @@ void ConsString::set_second(Isolate* isolate, String value,
   CONDITIONAL_WRITE_BARRIER(*this, kSecondOffset, value, mode);
 }
 
-ACCESSORS(ThinString, actual, String, kActualOffset);
+ACCESSORS(ThinString, actual, String, kActualOffset)
 
 HeapObject ThinString::unchecked_actual() const {
   return HeapObject::unchecked_cast(READ_FIELD(*this, kActualOffset));
@@ -563,11 +553,11 @@ bool ExternalString::is_uncached() const {
 }
 
 Address ExternalString::resource_as_address() {
-  return *reinterpret_cast<Address*>(FIELD_ADDR(*this, kResourceOffset));
+  return READ_UINTPTR_FIELD(*this, kResourceOffset);
 }
 
 void ExternalString::set_address_as_resource(Address address) {
-  *reinterpret_cast<Address*>(FIELD_ADDR(*this, kResourceOffset)) = address;
+  WRITE_UINTPTR_FIELD(*this, kResourceOffset, address);
   if (IsExternalOneByteString()) {
     ExternalOneByteString::cast(*this)->update_data_cache();
   } else {
@@ -576,41 +566,51 @@ void ExternalString::set_address_as_resource(Address address) {
 }
 
 uint32_t ExternalString::resource_as_uint32() {
-  return static_cast<uint32_t>(
-      *reinterpret_cast<uintptr_t*>(FIELD_ADDR(*this, kResourceOffset)));
+  return static_cast<uint32_t>(READ_UINTPTR_FIELD(*this, kResourceOffset));
 }
 
 void ExternalString::set_uint32_as_resource(uint32_t value) {
-  *reinterpret_cast<uintptr_t*>(FIELD_ADDR(*this, kResourceOffset)) = value;
+  WRITE_UINTPTR_FIELD(*this, kResourceOffset, value);
   if (is_uncached()) return;
-  const char** data_field =
-      reinterpret_cast<const char**>(FIELD_ADDR(*this, kResourceDataOffset));
-  *data_field = nullptr;
+  WRITE_UINTPTR_FIELD(*this, kResourceDataOffset, kNullAddress);
+}
+
+void ExternalString::DisposeResource() {
+  v8::String::ExternalStringResourceBase* resource =
+      reinterpret_cast<v8::String::ExternalStringResourceBase*>(
+          READ_UINTPTR_FIELD(*this, ExternalString::kResourceOffset));
+
+  // Dispose of the C++ object if it has not already been disposed.
+  if (resource != nullptr) {
+    resource->Dispose();
+    WRITE_UINTPTR_FIELD(*this, ExternalString::kResourceOffset, kNullAddress);
+  }
 }
 
 const ExternalOneByteString::Resource* ExternalOneByteString::resource() {
-  return *reinterpret_cast<Resource**>(FIELD_ADDR(*this, kResourceOffset));
+  return reinterpret_cast<Resource*>(
+      READ_UINTPTR_FIELD(*this, kResourceOffset));
 }
 
 void ExternalOneByteString::update_data_cache() {
   if (is_uncached()) return;
-  const char** data_field =
-      reinterpret_cast<const char**>(FIELD_ADDR(*this, kResourceDataOffset));
-  *data_field = resource()->data();
+  WRITE_UINTPTR_FIELD(*this, kResourceDataOffset,
+                      reinterpret_cast<Address>(resource()->data()));
 }
 
 void ExternalOneByteString::SetResource(
     Isolate* isolate, const ExternalOneByteString::Resource* resource) {
   set_resource(resource);
   size_t new_payload = resource == nullptr ? 0 : resource->length();
-  if (new_payload > 0)
+  if (new_payload > 0) {
     isolate->heap()->UpdateExternalString(*this, 0, new_payload);
+  }
 }
 
 void ExternalOneByteString::set_resource(
     const ExternalOneByteString::Resource* resource) {
-  *reinterpret_cast<const Resource**>(FIELD_ADDR(*this, kResourceOffset)) =
-      resource;
+  WRITE_UINTPTR_FIELD(*this, kResourceOffset,
+                      reinterpret_cast<Address>(resource));
   if (resource != nullptr) update_data_cache();
 }
 
@@ -624,28 +624,29 @@ uint16_t ExternalOneByteString::ExternalOneByteStringGet(int index) {
 }
 
 const ExternalTwoByteString::Resource* ExternalTwoByteString::resource() {
-  return *reinterpret_cast<Resource**>(FIELD_ADDR(*this, kResourceOffset));
+  return reinterpret_cast<Resource*>(
+      READ_UINTPTR_FIELD(*this, kResourceOffset));
 }
 
 void ExternalTwoByteString::update_data_cache() {
   if (is_uncached()) return;
-  const uint16_t** data_field = reinterpret_cast<const uint16_t**>(
-      FIELD_ADDR(*this, kResourceDataOffset));
-  *data_field = resource()->data();
+  WRITE_UINTPTR_FIELD(*this, kResourceDataOffset,
+                      reinterpret_cast<Address>(resource()->data()));
 }
 
 void ExternalTwoByteString::SetResource(
     Isolate* isolate, const ExternalTwoByteString::Resource* resource) {
   set_resource(resource);
   size_t new_payload = resource == nullptr ? 0 : resource->length() * 2;
-  if (new_payload > 0)
+  if (new_payload > 0) {
     isolate->heap()->UpdateExternalString(*this, 0, new_payload);
+  }
 }
 
 void ExternalTwoByteString::set_resource(
     const ExternalTwoByteString::Resource* resource) {
-  *reinterpret_cast<const Resource**>(FIELD_ADDR(*this, kResourceOffset)) =
-      resource;
+  WRITE_UINTPTR_FIELD(*this, kResourceOffset,
+                      reinterpret_cast<Address>(resource));
   if (resource != nullptr) update_data_cache();
 }
 

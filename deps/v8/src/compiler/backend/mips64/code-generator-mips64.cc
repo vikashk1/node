@@ -453,6 +453,8 @@ void EmitWordLoadPoisoningIfNeeded(CodeGenerator* codegen,
     __ load_linked(i.TempRegister(2), MemOperand(i.TempRegister(0), 0));       \
     __ ExtractBits(i.OutputRegister(0), i.TempRegister(2), i.TempRegister(1),  \
                    size, sign_extend);                                         \
+    __ ExtractBits(i.InputRegister(2), i.InputRegister(2), i.TempRegister(1),  \
+                   size, sign_extend);                                         \
     __ BranchShort(&exit, ne, i.InputRegister(2),                              \
                    Operand(i.OutputRegister(0)));                              \
     __ InsertBits(i.TempRegister(2), i.InputRegister(3), i.TempRegister(1),    \
@@ -948,10 +950,9 @@ CodeGenerator::CodeGenResult CodeGenerator::AssembleArchInstruction(
     case kIeee754Float64Log10:
       ASSEMBLE_IEEE754_UNOP(log10);
       break;
-    case kIeee754Float64Pow: {
-      __ Call(BUILTIN_CODE(isolate(), MathPowInternal), RelocInfo::CODE_TARGET);
+    case kIeee754Float64Pow:
+      ASSEMBLE_IEEE754_BINOP(pow);
       break;
-    }
     case kIeee754Float64Sin:
       ASSEMBLE_IEEE754_UNOP(sin);
       break;
@@ -3319,11 +3320,9 @@ void CodeGenerator::AssembleArchTrap(Instruction* instr,
 void CodeGenerator::AssembleArchBoolean(Instruction* instr,
                                         FlagsCondition condition) {
   MipsOperandConverter i(this, instr);
-  Label done;
 
   // Materialize a full 32-bit 1 or 0 value. The result register is always the
   // last output of the instruction.
-  Label false_value;
   DCHECK_NE(0u, instr->OutputCount());
   Register result = i.OutputRegister(instr->OutputCount() - 1);
   Condition cc = kNoCondition;
@@ -3561,8 +3560,8 @@ void CodeGenerator::AssembleConstructFrame() {
     }
   }
 
-  int shrink_slots = frame()->GetTotalFrameSlotCount() -
-                     call_descriptor->CalculateFixedFrameSize();
+  int required_slots = frame()->GetTotalFrameSlotCount() -
+                       call_descriptor->CalculateFixedFrameSize();
 
   if (info()->is_osr()) {
     // TurboFan OSR-compiled functions cannot be entered directly.
@@ -3574,7 +3573,7 @@ void CodeGenerator::AssembleConstructFrame() {
     // remaining stack slots.
     if (FLAG_code_comments) __ RecordComment("-- OSR entrypoint --");
     osr_pc_offset_ = __ pc_offset();
-    shrink_slots -= osr_helper()->UnoptimizedFrameSlots();
+    required_slots -= osr_helper()->UnoptimizedFrameSlots();
     ResetSpeculationPoison();
   }
 
@@ -3583,11 +3582,11 @@ void CodeGenerator::AssembleConstructFrame() {
   const int returns = frame()->GetReturnSlotCount();
 
   // Skip callee-saved and return slots, which are pushed below.
-  shrink_slots -= base::bits::CountPopulation(saves);
-  shrink_slots -= base::bits::CountPopulation(saves_fpu);
-  shrink_slots -= returns;
-  if (shrink_slots > 0) {
-    __ Dsubu(sp, sp, Operand(shrink_slots * kSystemPointerSize));
+  required_slots -= base::bits::CountPopulation(saves);
+  required_slots -= base::bits::CountPopulation(saves_fpu);
+  required_slots -= returns;
+  if (required_slots > 0) {
+    __ Dsubu(sp, sp, Operand(required_slots * kSystemPointerSize));
   }
 
   if (saves_fpu != 0) {

@@ -16,6 +16,9 @@
 #include "src/counters.h"
 #include "src/deoptimizer.h"
 #include "src/frames-inl.h"
+#include "src/heap/heap-inl.h"  // For ToBoolean. TODO(jkummerow): Drop.
+#include "src/heap/heap-write-barrier-inl.h"
+#include "src/ic/stub-cache.h"
 #include "src/isolate-inl.h"
 #include "src/objects/heap-object-inl.h"
 #include "src/objects/smi.h"
@@ -44,7 +47,7 @@ using WasmCompileControlsMap = std::map<v8::Isolate*, WasmCompileControls>;
 // isolates concurrently. Methods need to hold the accompanying mutex on access.
 // To avoid upsetting the static initializer count, we lazy initialize this.
 DEFINE_LAZY_LEAKY_OBJECT_GETTER(WasmCompileControlsMap,
-                                GetPerIsolateWasmControls);
+                                GetPerIsolateWasmControls)
 base::LazyMutex g_PerIsolateWasmControlsMutex = LAZY_MUTEX_INITIALIZER;
 
 bool IsWasmCompileAllowed(v8::Isolate* isolate, v8::Local<v8::Value> value,
@@ -55,6 +58,9 @@ bool IsWasmCompileAllowed(v8::Isolate* isolate, v8::Local<v8::Value> value,
   return (is_async && ctrls.AllowAnySizeForAsync) ||
          (value->IsArrayBuffer() &&
           v8::Local<v8::ArrayBuffer>::Cast(value)->ByteLength() <=
+              ctrls.MaxWasmBufferSize) ||
+         (value->IsArrayBufferView() &&
+          v8::Local<v8::ArrayBufferView>::Cast(value)->ByteLength() <=
               ctrls.MaxWasmBufferSize);
 }
 
@@ -102,6 +108,14 @@ bool WasmInstanceOverride(const v8::FunctionCallbackInfo<v8::Value>& args) {
 }
 
 }  // namespace
+
+RUNTIME_FUNCTION(Runtime_ClearMegamorphicStubCache) {
+  HandleScope scope(isolate);
+  DCHECK_EQ(0, args.length());
+  isolate->load_stub_cache()->Clear();
+  isolate->store_stub_cache()->Clear();
+  return ReadOnlyRoots(isolate).undefined_value();
+}
 
 RUNTIME_FUNCTION(Runtime_ConstructDouble) {
   HandleScope scope(isolate);
@@ -285,6 +299,60 @@ RUNTIME_FUNCTION(Runtime_OptimizeFunctionOnNextCall) {
   return ReadOnlyRoots(isolate).undefined_value();
 }
 
+RUNTIME_FUNCTION(Runtime_PrepareFunctionForOptimization) {
+  HandleScope scope(isolate);
+  DCHECK_EQ(1, args.length());
+  CONVERT_ARG_HANDLE_CHECKED(JSFunction, function, 0);
+
+  // Only one function should be prepared for optimization at a time
+  CHECK(isolate->heap()->pending_optimize_for_test_bytecode()->IsUndefined());
+
+  // Check function allows lazy compilation.
+  if (!function->shared()->allows_lazy_compilation()) {
+    return ReadOnlyRoots(isolate).undefined_value();
+  }
+
+  // If function isn't compiled, compile it now.
+  IsCompiledScope is_compiled_scope(function->shared()->is_compiled_scope());
+  if (!is_compiled_scope.is_compiled() &&
+      !Compiler::Compile(function, Compiler::CLEAR_EXCEPTION,
+                         &is_compiled_scope)) {
+    return ReadOnlyRoots(isolate).undefined_value();
+  }
+
+  // Ensure function has a feedback vector to hold type feedback for
+  // optimization.
+  JSFunction::EnsureFeedbackVector(function);
+
+  // If optimization is disabled for the function, return without making it
+  // pending optimize for test.
+  if (function->shared()->optimization_disabled() &&
+      function->shared()->disable_optimization_reason() ==
+          BailoutReason::kNeverOptimize) {
+    return ReadOnlyRoots(isolate).undefined_value();
+  }
+
+  // If the function is already optimized, return without making it pending
+  // optimize for test.
+  if (function->IsOptimized() || function->shared()->HasAsmWasmData()) {
+    return ReadOnlyRoots(isolate).undefined_value();
+  }
+
+  // If the function has optimized code, ensure that we check for it and then
+  // return without making it pending optimize for test.
+  if (function->HasOptimizedCode()) {
+    DCHECK(function->ChecksOptimizationMarker());
+    return ReadOnlyRoots(isolate).undefined_value();
+  }
+
+  // Hold onto the bytecode array between marking and optimization to ensure
+  // it's not flushed.
+  isolate->heap()->SetPendingOptimizeForTestBytecode(
+      function->shared()->GetBytecodeArray());
+
+  return ReadOnlyRoots(isolate).undefined_value();
+}
+
 RUNTIME_FUNCTION(Runtime_OptimizeOsr) {
   HandleScope scope(isolate);
   DCHECK(args.length() == 0 || args.length() == 1);
@@ -349,7 +417,9 @@ RUNTIME_FUNCTION(Runtime_GetOptimizationStatus) {
   HandleScope scope(isolate);
   DCHECK(args.length() == 1 || args.length() == 2);
   int status = 0;
-  if (FLAG_lite_mode) {
+  if (FLAG_lite_mode || FLAG_jitless) {
+    // Both jitless and lite modes cannot optimize. Unit tests should handle
+    // these the same way. In the future, the two flags may become synonyms.
     status |= static_cast<int>(OptimizationStatus::kLiteMode);
   }
   if (!isolate->use_optimizer()) {
@@ -796,7 +866,7 @@ RUNTIME_FUNCTION(Runtime_InNewSpace) {
   SealHandleScope shs(isolate);
   DCHECK_EQ(1, args.length());
   CONVERT_ARG_CHECKED(Object, obj, 0);
-  return isolate->heap()->ToBoolean(Heap::InNewSpace(obj));
+  return isolate->heap()->ToBoolean(ObjectInYoungGeneration(obj));
 }
 
 RUNTIME_FUNCTION(Runtime_IsAsmWasmCode) {
@@ -874,10 +944,9 @@ RUNTIME_FUNCTION(Runtime_GetWasmExceptionId) {
   DCHECK_EQ(2, args.length());
   CONVERT_ARG_HANDLE_CHECKED(JSReceiver, exception, 0);
   CONVERT_ARG_HANDLE_CHECKED(WasmInstanceObject, instance, 1);
-  Handle<Object> tag;
-  if (JSReceiver::GetProperty(isolate, exception,
-                              isolate->factory()->wasm_exception_tag_symbol())
-          .ToHandle(&tag)) {
+  Handle<Object> tag =
+      WasmExceptionPackage::GetExceptionTag(isolate, exception);
+  if (tag->IsWasmExceptionTag()) {
     Handle<FixedArray> exceptions_table(instance->exceptions_table(), isolate);
     for (int index = 0; index < exceptions_table->length(); ++index) {
       if (exceptions_table->get(index) == *tag) return Smi::FromInt(index);
@@ -890,11 +959,9 @@ RUNTIME_FUNCTION(Runtime_GetWasmExceptionValues) {
   HandleScope scope(isolate);
   DCHECK_EQ(1, args.length());
   CONVERT_ARG_HANDLE_CHECKED(JSReceiver, exception, 0);
-  Handle<Object> values_obj;
-  CHECK(JSReceiver::GetProperty(
-            isolate, exception,
-            isolate->factory()->wasm_exception_values_symbol())
-            .ToHandle(&values_obj));
+  Handle<Object> values_obj =
+      WasmExceptionPackage::GetExceptionValues(isolate, exception);
+  CHECK(values_obj->IsFixedArray());  // Only called with correct input.
   Handle<FixedArray> values = Handle<FixedArray>::cast(values_obj);
   return *isolate->factory()->NewJSArrayWithElements(values);
 }
@@ -929,6 +996,7 @@ ELEMENTS_KIND_CHECK_RUNTIME_FUNCTION(SmiOrObjectElements)
 ELEMENTS_KIND_CHECK_RUNTIME_FUNCTION(DoubleElements)
 ELEMENTS_KIND_CHECK_RUNTIME_FUNCTION(HoleyElements)
 ELEMENTS_KIND_CHECK_RUNTIME_FUNCTION(DictionaryElements)
+ELEMENTS_KIND_CHECK_RUNTIME_FUNCTION(PackedElements)
 ELEMENTS_KIND_CHECK_RUNTIME_FUNCTION(SloppyArgumentsElements)
 // Properties test sitting with elements tests - not fooling anyone.
 ELEMENTS_KIND_CHECK_RUNTIME_FUNCTION(FastProperties)
@@ -998,17 +1066,23 @@ RUNTIME_FUNCTION(Runtime_DeserializeWasmModule) {
   HandleScope scope(isolate);
   DCHECK_EQ(2, args.length());
   CONVERT_ARG_HANDLE_CHECKED(JSArrayBuffer, buffer, 0);
-  CONVERT_ARG_HANDLE_CHECKED(JSArrayBuffer, wire_bytes, 1);
+  CONVERT_ARG_HANDLE_CHECKED(JSTypedArray, wire_bytes, 1);
+  CHECK(!buffer->was_detached());
+  CHECK(!wire_bytes->WasDetached());
+
+  Handle<JSArrayBuffer> wire_bytes_buffer = wire_bytes->GetBuffer();
+  Vector<const uint8_t> wire_bytes_vec{
+      reinterpret_cast<const uint8_t*>(wire_bytes_buffer->backing_store()) +
+          wire_bytes->byte_offset(),
+      wire_bytes->byte_length()};
+  Vector<uint8_t> buffer_vec{
+      reinterpret_cast<uint8_t*>(buffer->backing_store()),
+      buffer->byte_length()};
 
   // Note that {wasm::DeserializeNativeModule} will allocate. We assume the
   // JSArrayBuffer backing store doesn't get relocated.
   MaybeHandle<WasmModuleObject> maybe_module_object =
-      wasm::DeserializeNativeModule(
-          isolate,
-          {reinterpret_cast<uint8_t*>(buffer->backing_store()),
-           buffer->byte_length()},
-          {reinterpret_cast<uint8_t*>(wire_bytes->backing_store()),
-           wire_bytes->byte_length()});
+      wasm::DeserializeNativeModule(isolate, buffer_vec, wire_bytes_vec);
   Handle<WasmModuleObject> module_object;
   if (!maybe_module_object.ToHandle(&module_object)) {
     return ReadOnlyRoots(isolate).undefined_value();

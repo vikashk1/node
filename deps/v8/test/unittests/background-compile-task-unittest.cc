@@ -18,6 +18,7 @@
 #include "src/parsing/parser.h"
 #include "src/parsing/preparse-data.h"
 #include "src/v8.h"
+#include "src/zone/zone-list-inl.h"
 #include "test/unittests/test-helpers.h"
 #include "test/unittests/test-utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -35,11 +36,11 @@ class BackgroundCompileTaskTest : public TestWithNativeContext {
   static void SetUpTestCase() {
     CHECK_NULL(save_flags_);
     save_flags_ = new SaveFlags();
-    TestWithNativeContext ::SetUpTestCase();
+    TestWithNativeContext::SetUpTestCase();
   }
 
   static void TearDownTestCase() {
-    TestWithNativeContext ::TearDownTestCase();
+    TestWithNativeContext::TearDownTestCase();
     CHECK_NOT_NULL(save_flags_);
     delete save_flags_;
     save_flags_ = nullptr;

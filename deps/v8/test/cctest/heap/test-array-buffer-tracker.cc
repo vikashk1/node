@@ -212,7 +212,7 @@ TEST(ArrayBuffer_NonLivePromotion) {
   {
     v8::HandleScope handle_scope(isolate);
     Handle<FixedArray> root =
-        heap->isolate()->factory()->NewFixedArray(1, TENURED);
+        heap->isolate()->factory()->NewFixedArray(1, AllocationType::kOld);
     {
       v8::HandleScope handle_scope(isolate);
       Local<v8::ArrayBuffer> ab = v8::ArrayBuffer::New(isolate, 100);
@@ -249,7 +249,7 @@ TEST(ArrayBuffer_LivePromotion) {
   {
     v8::HandleScope handle_scope(isolate);
     Handle<FixedArray> root =
-        heap->isolate()->factory()->NewFixedArray(1, TENURED);
+        heap->isolate()->factory()->NewFixedArray(1, AllocationType::kOld);
     {
       v8::HandleScope handle_scope(isolate);
       Local<v8::ArrayBuffer> ab = v8::ArrayBuffer::New(isolate, 100);
@@ -285,7 +285,7 @@ TEST(ArrayBuffer_SemiSpaceCopyThenPagePromotion) {
   {
     v8::HandleScope handle_scope(isolate);
     Handle<FixedArray> root =
-        heap->isolate()->factory()->NewFixedArray(1, TENURED);
+        heap->isolate()->factory()->NewFixedArray(1, AllocationType::kOld);
     {
       v8::HandleScope handle_scope(isolate);
       Local<v8::ArrayBuffer> ab = v8::ArrayBuffer::New(isolate, 100);
@@ -308,10 +308,11 @@ TEST(ArrayBuffer_SemiSpaceCopyThenPagePromotion) {
 
 UNINITIALIZED_TEST(ArrayBuffer_SemiSpaceCopyMultipleTasks) {
   if (FLAG_optimize_for_size) return;
+  ManualGCScope manual_gc_scope;
   // Test allocates JSArrayBuffer on different pages before triggering a
   // full GC that performs the semispace copy. If parallelized, this test
   // ensures proper synchronization in TSAN configurations.
-  FLAG_min_semi_space_size = 2 * Page::kPageSize / MB;
+  FLAG_min_semi_space_size = Max(2 * Page::kPageSize / MB, 1);
   v8::Isolate::CreateParams create_params;
   create_params.array_buffer_allocator = CcTest::array_buffer_allocator();
   v8::Isolate* isolate = v8::Isolate::New(create_params);

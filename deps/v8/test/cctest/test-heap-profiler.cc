@@ -40,6 +40,7 @@
 #include "src/base/optional.h"
 #include "src/collector.h"
 #include "src/debug/debug.h"
+#include "src/heap/heap-inl.h"
 #include "src/objects-inl.h"
 #include "src/profiler/allocation-tracker.h"
 #include "src/profiler/heap-profiler.h"
@@ -1671,11 +1672,11 @@ TEST(HeapSnapshotRetainedObjectInfo) {
   CHECK(ValidateSnapshot(snapshot));
 
   const v8::HeapGraphNode* native_group_aaa =
-      GetNode(snapshot->GetRoot(), v8::HeapGraphNode::kNative, "aaa-group");
-  CHECK(native_group_aaa);
+      GetNode(snapshot->GetRoot(), v8::HeapGraphNode::kSynthetic, "aaa-group");
+  CHECK_NOT_NULL(native_group_aaa);
   const v8::HeapGraphNode* native_group_ccc =
-      GetNode(snapshot->GetRoot(), v8::HeapGraphNode::kNative, "ccc-group");
-  CHECK(native_group_ccc);
+      GetNode(snapshot->GetRoot(), v8::HeapGraphNode::kSynthetic, "ccc-group");
+  CHECK_NOT_NULL(native_group_ccc);
 
   const v8::HeapGraphNode* n_AAA =
       GetNode(native_group_aaa, v8::HeapGraphNode::kString, "AAA");
@@ -2693,6 +2694,9 @@ TEST(TrackHeapAllocationsWithInlining) {
   CHECK(node);
   // In lite mode, there is feedback and feedback metadata.
   unsigned int num_nodes = (i::FLAG_lite_mode) ? 6 : 8;
+  // Without forced source position collection, there is no source position
+  // table.
+  if (i::FLAG_enable_lazy_source_positions) num_nodes -= 1;
   CHECK_GE(node->allocation_count(), num_nodes);
   CHECK_GE(node->allocation_size(), 4 * node->allocation_count());
   heap_profiler->StopTrackingHeapObjects();

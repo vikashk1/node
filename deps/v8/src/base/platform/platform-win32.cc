@@ -113,7 +113,7 @@ class WindowsTimezoneCache : public TimezoneCache {
 
   ~WindowsTimezoneCache() override {}
 
-  void Clear() override { initialized_ = false; }
+  void Clear(TimeZoneDetection) override { initialized_ = false; }
 
   const char* LocalTimezone(double time) override;
 
@@ -690,7 +690,7 @@ void OS::StrNCpy(char* dest, int length, const char* src, size_t n) {
 #undef STRUNCATE
 
 DEFINE_LAZY_LEAKY_OBJECT_GETTER(RandomNumberGenerator,
-                                GetPlatformRandomNumberGenerator);
+                                GetPlatformRandomNumberGenerator)
 static LazyMutex rng_mutex = LAZY_MUTEX_INITIALIZER;
 
 void OS::Initialize(bool hard_abort, const char* const gc_fake_mmap) {
@@ -920,6 +920,11 @@ void OS::Sleep(TimeDelta interval) {
 
 
 void OS::Abort() {
+  // Give a chance to debug the failure.
+  if (IsDebuggerPresent()) {
+    DebugBreak();
+  }
+
   // Before aborting, make sure to flush output buffers.
   fflush(stdout);
   fflush(stderr);
@@ -968,26 +973,33 @@ class Win32MemoryMappedFile final : public OS::MemoryMappedFile {
 
 
 // static
-OS::MemoryMappedFile* OS::MemoryMappedFile::open(const char* name) {
+OS::MemoryMappedFile* OS::MemoryMappedFile::open(const char* name,
+                                                 FileMode mode) {
   // Open a physical file.
-  HANDLE file = CreateFileA(name, GENERIC_READ | GENERIC_WRITE,
-                            FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
-                            OPEN_EXISTING, 0, nullptr);
+  DWORD access = GENERIC_READ;
+  if (mode == FileMode::kReadWrite) {
+    access |= GENERIC_WRITE;
+  }
+  HANDLE file = CreateFileA(name, access, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                            nullptr, OPEN_EXISTING, 0, nullptr);
   if (file == INVALID_HANDLE_VALUE) return nullptr;
 
   DWORD size = GetFileSize(file, nullptr);
   if (size == 0) return new Win32MemoryMappedFile(file, nullptr, nullptr, 0);
 
+  DWORD protection =
+      (mode == FileMode::kReadOnly) ? PAGE_READONLY : PAGE_READWRITE;
   // Create a file mapping for the physical file.
   HANDLE file_mapping =
-      CreateFileMapping(file, nullptr, PAGE_READWRITE, 0, size, nullptr);
+      CreateFileMapping(file, nullptr, protection, 0, size, nullptr);
   if (file_mapping == nullptr) return nullptr;
 
   // Map a view of the file into memory.
-  void* memory = MapViewOfFile(file_mapping, FILE_MAP_ALL_ACCESS, 0, 0, size);
+  DWORD view_access =
+      (mode == FileMode::kReadOnly) ? FILE_MAP_READ : FILE_MAP_ALL_ACCESS;
+  void* memory = MapViewOfFile(file_mapping, view_access, 0, 0, size);
   return new Win32MemoryMappedFile(file, file_mapping, memory, size);
 }
-
 
 // static
 OS::MemoryMappedFile* OS::MemoryMappedFile::create(const char* name,

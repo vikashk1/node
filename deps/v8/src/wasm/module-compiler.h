@@ -37,7 +37,7 @@ class NativeModule;
 class WasmCode;
 struct WasmModule;
 
-std::unique_ptr<NativeModule> CompileToNativeModule(
+std::shared_ptr<NativeModule> CompileToNativeModule(
     Isolate* isolate, const WasmFeatures& enabled, ErrorThrower* thrower,
     std::shared_ptr<const WasmModule> module, const ModuleWireBytes& wire_bytes,
     Handle<FixedArray>* export_wrappers_out);
@@ -56,8 +56,7 @@ V8_EXPORT_PRIVATE Handle<Script> CreateWasmScript(
     const std::string& source_map_url);
 
 // Triggered by the WasmCompileLazy builtin.
-// Returns the instruction start of the compiled code object.
-Address CompileLazy(Isolate*, NativeModule*, uint32_t func_index);
+void CompileLazy(Isolate*, NativeModule*, uint32_t func_index);
 
 // Encapsulates all the state and steps of an asynchronous compilation.
 // An asynchronous compile job consists of a number of tasks that are executed
@@ -92,7 +91,8 @@ class AsyncCompileJob {
   class DecodeModule;            // Step 1  (async)
   class DecodeFail;              // Step 1b (sync)
   class PrepareAndStartCompile;  // Step 2  (sync)
-  class CompileFailed;           // Step 4b (sync)
+  class CompileFailed;           // Step 3a (sync)
+  class CompileFinished;         // Step 3b (sync)
 
   friend class AsyncStreamingProcessor;
 
@@ -100,6 +100,7 @@ class AsyncCompileJob {
   // function should finish the asynchronous compilation, see the comment on
   // {outstanding_finishers_}.
   V8_WARN_UNUSED_RESULT bool DecrementAndCheckFinisherCount() {
+    DCHECK_LT(0, outstanding_finishers_.load());
     return outstanding_finishers_.fetch_sub(1) == 1;
   }
 
@@ -108,7 +109,8 @@ class AsyncCompileJob {
 
   void FinishCompile();
 
-  void AsyncCompileFailed(Handle<Object> error_reason);
+  void DecodeFailed(const WasmError&);
+  void AsyncCompileFailed();
 
   void AsyncCompileSucceeded(Handle<WasmModuleObject> result);
 
@@ -153,13 +155,12 @@ class AsyncCompileJob {
   // Copy of the module wire bytes, moved into the {native_module_} on its
   // creation.
   std::unique_ptr<byte[]> bytes_copy_;
-  // Reference to the wire bytes (hold in {bytes_copy_} or as part of
+  // Reference to the wire bytes (held in {bytes_copy_} or as part of
   // {native_module_}).
   ModuleWireBytes wire_bytes_;
   Handle<Context> native_context_;
   const std::shared_ptr<CompilationResultResolver> resolver_;
 
-  std::vector<DeferredHandles*> deferred_handles_;
   Handle<WasmModuleObject> module_object_;
   std::shared_ptr<NativeModule> native_module_;
 

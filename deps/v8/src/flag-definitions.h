@@ -66,8 +66,16 @@
 #define DEFINE_VALUE_IMPLICATION(whenflag, thenflag, value) \
   if (FLAG_##whenflag) FLAG_##thenflag = value;
 
+#define DEFINE_GENERIC_IMPLICATION(whenflag, statement) \
+  if (FLAG_##whenflag) statement;
+
 #define DEFINE_NEG_VALUE_IMPLICATION(whenflag, thenflag, value) \
   if (!FLAG_##whenflag) FLAG_##thenflag = value;
+
+// We apply a generic macro to the flags.
+#elif defined(FLAG_MODE_APPLY)
+
+#define FLAG_FULL FLAG_MODE_APPLY
 
 #else
 #error No mode supplied when including flags.defs
@@ -90,6 +98,10 @@
 #define DEFINE_VALUE_IMPLICATION(whenflag, thenflag, value)
 #endif
 
+#ifndef DEFINE_GENERIC_IMPLICATION
+#define DEFINE_GENERIC_IMPLICATION(whenflag, statement)
+#endif
+
 #ifndef DEFINE_NEG_VALUE_IMPLICATION
 #define DEFINE_NEG_VALUE_IMPLICATION(whenflag, thenflag, value)
 #endif
@@ -107,6 +119,10 @@ struct MaybeBoolFlag {
   }
   bool has_value;
   bool value;
+
+  bool operator!=(const MaybeBoolFlag& other) const {
+    return has_value != other.has_value || value != other.value;
+  }
 };
 #endif
 
@@ -204,22 +220,21 @@ DEFINE_IMPLICATION(harmony_private_methods, harmony_private_fields)
   V(harmony_weak_refs, "harmony weak references")                         \
 
 #ifdef V8_INTL_SUPPORT
-#define HARMONY_INPROGRESS(V) \
-  HARMONY_INPROGRESS_BASE(V)  \
-  V(harmony_locale, "Intl.Locale")
+#define HARMONY_INPROGRESS(V)                               \
+  HARMONY_INPROGRESS_BASE(V)                                \
+  V(harmony_intl_bigint, "BigInt.prototype.toLocaleString") \
+  V(harmony_intl_datetime_style, "dateStyle timeStyle for DateTimeFormat")
 #else
 #define HARMONY_INPROGRESS(V) HARMONY_INPROGRESS_BASE(V)
 #endif
 
 // Features that are complete (but still behind --harmony/es-staging flag).
-#define HARMONY_STAGED_BASE(V)                                             \
-  V(harmony_private_fields, "harmony private fields in class literals")    \
-  V(harmony_numeric_separator, "harmony numeric separator between digits") \
-  V(harmony_hashbang, "harmony hashbang syntax")
+#define HARMONY_STAGED_BASE(V) \
+  V(harmony_numeric_separator, "harmony numeric separator between digits")
 
 #ifdef V8_INTL_SUPPORT
-#define HARMONY_STAGED(V)                        \
-  HARMONY_STAGED_BASE(V)                         \
+#define HARMONY_STAGED(V)          \
+  HARMONY_STAGED_BASE(V)           \
   V(harmony_intl_segmenter, "Intl.Segmenter")
 #else
 #define HARMONY_STAGED(V) HARMONY_STAGED_BASE(V)
@@ -232,21 +247,20 @@ DEFINE_IMPLICATION(harmony_private_methods, harmony_private_fields)
   V(harmony_sharedarraybuffer, "harmony sharedarraybuffer")                    \
   V(harmony_import_meta, "harmony import.meta property")                       \
   V(harmony_dynamic_import, "harmony dynamic import")                          \
-  V(harmony_array_flat, "harmony Array.prototype.{flat,flatMap}")              \
-  V(harmony_symbol_description, "harmony Symbol.prototype.description")        \
   V(harmony_global, "harmony global")                                          \
   V(harmony_json_stringify, "well-formed JSON.stringify")                      \
   V(harmony_public_fields, "harmony public instance fields in class literals") \
   V(harmony_static_fields, "harmony static fields in class literals")          \
   V(harmony_string_matchall, "harmony String.prototype.matchAll")              \
   V(harmony_object_from_entries, "harmony Object.fromEntries()")               \
-  V(harmony_await_optimization, "harmony await taking 1 tick")
+  V(harmony_await_optimization, "harmony await taking 1 tick")                 \
+  V(harmony_private_fields, "harmony private fields in class literals")        \
+  V(harmony_hashbang, "harmony hashbang syntax")
 
 #ifdef V8_INTL_SUPPORT
-#define HARMONY_SHIPPING(V)                      \
-  HARMONY_SHIPPING_BASE(V)                       \
-  V(harmony_intl_list_format, "Intl.ListFormat") \
-  V(harmony_intl_relative_time_format, "Intl.RelativeTimeFormat")
+#define HARMONY_SHIPPING(V) \
+  HARMONY_SHIPPING_BASE(V)  \
+  V(harmony_locale, "Intl.Locale")
 #else
 #define HARMONY_SHIPPING(V) HARMONY_SHIPPING_BASE(V)
 #endif
@@ -278,6 +292,12 @@ HARMONY_SHIPPING(FLAG_SHIPPING_FEATURES)
 DEFINE_BOOL(icu_timezone_data, true, "get information about timezones from ICU")
 #endif
 
+#ifdef V8_ENABLE_RAW_HEAP_SNAPSHOTS
+#define V8_ENABLE_RAW_HEAP_SNAPSHOTS_BOOL true
+#else
+#define V8_ENABLE_RAW_HEAP_SNAPSHOTS_BOOL false
+#endif  // V8_ENABLE_RAW_HEAP_SNAPSHOTS
+
 #ifdef V8_LITE_MODE
 #define V8_LITE_BOOL true
 #else
@@ -294,7 +314,6 @@ DEFINE_BOOL(future, FUTURE_BOOL,
             "not-too-far future")
 
 DEFINE_IMPLICATION(future, write_protect_code_memory)
-DEFINE_IMPLICATION(future, flush_bytecode)
 
 // Flags for experimental implementation features.
 DEFINE_BOOL(allocation_site_pretenuring, true,
@@ -323,6 +342,10 @@ DEFINE_BOOL(feedback_normalization, false,
 // TODO(jkummerow): This currently adds too much load on the stub cache.
 DEFINE_BOOL_READONLY(internalize_on_the_fly, true,
                      "internalize string keys for generic keyed ICs on the fly")
+
+// Flag to faster calls with arguments mismatches (https://crbug.com/v8/8895)
+DEFINE_BOOL(fast_calls_with_arguments_mismatches, true,
+            "skip arguments adaptor frames when it's provably safe")
 
 // Flag for one shot optimiztions.
 DEFINE_BOOL(enable_one_shot_optimization, true,
@@ -357,6 +380,9 @@ DEFINE_BOOL(ignition_share_named_property_feedback, true,
             "the same object")
 DEFINE_BOOL(print_bytecode, false,
             "print bytecode generated by ignition interpreter")
+DEFINE_BOOL(enable_lazy_source_positions, V8_LITE_BOOL,
+            "skip generating source positions during initial compile but "
+            "regenerate when actually required")
 DEFINE_STRING(print_bytecode_filter, "*",
               "filter for selecting which functions to print bytecode")
 #ifdef V8_TRACE_IGNITION
@@ -410,6 +436,11 @@ DEFINE_BOOL(turbo_sp_frame_access, false,
             "use stack pointer-relative access to frame wherever possible")
 DEFINE_BOOL(turbo_preprocess_ranges, true,
             "run pre-register allocation heuristics")
+DEFINE_BOOL(turbo_control_flow_aware_allocation, false,
+            "consider control flow while allocating registers")
+DEFINE_NEG_IMPLICATION(turbo_control_flow_aware_allocation,
+                       turbo_preprocess_ranges)
+
 DEFINE_STRING(turbo_filter, "*", "optimization filter for TurboFan compiler")
 DEFINE_BOOL(trace_turbo, false, "trace generated TurboFan IR")
 DEFINE_STRING(trace_turbo_path, nullptr,
@@ -447,7 +478,7 @@ DEFINE_BOOL(trace_verify_csa, false, "trace code stubs verification")
 DEFINE_STRING(csa_trap_on_node, nullptr,
               "trigger break point when a node with given id is created in "
               "given stub. The format is: StubName,NodeId")
-DEFINE_BOOL_READONLY(fixed_array_bounds_checks, DEBUG_BOOL,
+DEFINE_BOOL_READONLY(fixed_array_bounds_checks, true,
                      "enable FixedArray bounds checks")
 DEFINE_BOOL(turbo_stats, false, "print TurboFan statistics")
 DEFINE_BOOL(turbo_stats_nvp, false,
@@ -651,6 +682,7 @@ DEFINE_DEBUG_BOOL(trace_wasm_lazy_compilation, false,
 // wasm-interpret-all resets {asm-,}wasm-lazy-compilation.
 DEFINE_NEG_IMPLICATION(wasm_interpret_all, asm_wasm_lazy_compilation)
 DEFINE_NEG_IMPLICATION(wasm_interpret_all, wasm_lazy_compilation)
+DEFINE_NEG_IMPLICATION(wasm_interpret_all, wasm_tier_up)
 
 // Profiler flags.
 DEFINE_INT(frame_count, 1, "number of stack frames inspected by the profiler")
@@ -748,8 +780,14 @@ DEFINE_BOOL(concurrent_array_buffer_freeing, true,
             "free array buffer allocations on a background thread")
 DEFINE_INT(gc_stats, 0, "Used by tracing internally to enable gc statistics")
 DEFINE_IMPLICATION(trace_gc_object_stats, track_gc_object_stats)
-DEFINE_VALUE_IMPLICATION(track_gc_object_stats, gc_stats, 1)
-DEFINE_VALUE_IMPLICATION(trace_gc_object_stats, gc_stats, 1)
+DEFINE_GENERIC_IMPLICATION(
+    track_gc_object_stats,
+    TracingFlags::gc_stats.store(
+        v8::tracing::TracingCategoryObserver::ENABLED_BY_NATIVE))
+DEFINE_GENERIC_IMPLICATION(
+    trace_gc_object_stats,
+    TracingFlags::gc_stats.store(
+        v8::tracing::TracingCategoryObserver::ENABLED_BY_NATIVE))
 DEFINE_NEG_IMPLICATION(trace_gc_object_stats, incremental_marking)
 DEFINE_NEG_IMPLICATION(track_retaining_path, incremental_marking)
 DEFINE_NEG_IMPLICATION(track_retaining_path, parallel_marking)
@@ -766,6 +804,8 @@ DEFINE_BOOL(verify_heap_skip_remembered_set, false,
 #endif
 DEFINE_BOOL(move_object_start, true, "enable moving of object starts")
 DEFINE_BOOL(memory_reducer, true, "use memory reducer")
+DEFINE_BOOL(memory_reducer_for_small_heaps, true,
+            "use memory reducer for small heaps")
 DEFINE_INT(heap_growing_percent, 0,
            "specifies heap growing factor as (1 + heap_growing_percent/100)")
 DEFINE_INT(v8_os_page_size, 0, "override OS page size (in KBytes)")
@@ -773,7 +813,7 @@ DEFINE_BOOL(always_compact, false, "Perform compaction on every full GC")
 DEFINE_BOOL(never_compact, false,
             "Never perform compaction on full GC - testing only")
 DEFINE_BOOL(compact_code_space, true, "Compact code space on full collections")
-DEFINE_BOOL(flush_bytecode, V8_LITE_BOOL,
+DEFINE_BOOL(flush_bytecode, true,
             "flush of bytecode when it has not been executed recently")
 DEFINE_BOOL(stress_flush_bytecode, false, "stress bytecode flushing")
 DEFINE_IMPLICATION(stress_flush_bytecode, flush_bytecode)
@@ -814,7 +854,7 @@ DEFINE_BOOL(fast_promotion_new_space, false,
 
 DEFINE_BOOL(clear_free_memory, false, "initialize free memory with 0")
 
-DEFINE_BOOL(young_generation_large_objects, false,
+DEFINE_BOOL(young_generation_large_objects, true,
             "allocates large objects by default in the young generation large "
             "object space")
 
@@ -847,6 +887,10 @@ DEFINE_BOOL(force_long_branches, false,
 DEFINE_STRING(mcpu, "auto", "enable optimization for specific cpu")
 DEFINE_BOOL(partial_constant_pool, true,
             "enable use of partial constant pools (X64 only)")
+
+// Controlling source positions for Torque/CSA code.
+DEFINE_BOOL(enable_source_at_csa_bind, false,
+            "Include source information in the binary at CSA bind locations.")
 
 // Deprecated ARM flags (replaced by arm_arch).
 DEFINE_MAYBE_BOOL(enable_armv7, "deprecated (use --arm_arch instead)")
@@ -898,6 +942,8 @@ DEFINE_BOOL(trace, false, "trace function calls")
 
 // codegen.cc
 DEFINE_BOOL(lazy, true, "use lazy compilation")
+DEFINE_BOOL(max_lazy, false, "ignore eager compilation hints")
+DEFINE_IMPLICATION(max_lazy, lazy)
 DEFINE_BOOL(trace_opt, false, "trace lazy optimization")
 DEFINE_BOOL(trace_opt_verbose, false, "extra verbose compilation tracing")
 DEFINE_IMPLICATION(trace_opt_verbose, trace_opt)
@@ -987,13 +1033,16 @@ DEFINE_BOOL(use_idle_notification, true,
 DEFINE_BOOL(trace_ic, false,
             "trace inline cache state transitions for tools/ic-processor")
 DEFINE_IMPLICATION(trace_ic, log_code)
-DEFINE_INT(ic_stats, 0, "inline cache state transitions statistics")
-DEFINE_VALUE_IMPLICATION(trace_ic, ic_stats, 1)
-DEFINE_BOOL_READONLY(track_constant_fields, false,
+DEFINE_GENERIC_IMPLICATION(
+    trace_ic, TracingFlags::ic_stats.store(
+                  v8::tracing::TracingCategoryObserver::ENABLED_BY_NATIVE))
+DEFINE_BOOL_READONLY(track_constant_fields, true,
                      "enable constant field tracking")
-DEFINE_BOOL_READONLY(modify_map_inplace, false, "enable in-place map updates")
+DEFINE_BOOL_READONLY(modify_map_inplace, true, "enable in-place map updates")
 DEFINE_BOOL_READONLY(fast_map_update, false,
                      "enable fast map update by caching the migration target")
+DEFINE_INT(max_polymorphic_map_count, 4,
+           "maximum number of maps to track in POLYMORPHIC state")
 
 // macro-assembler-ia32.cc
 DEFINE_BOOL(native_code_counters, false,
@@ -1011,6 +1060,7 @@ DEFINE_IMPLICATION(trace_maps, log_code)
 
 // parser.cc
 DEFINE_BOOL(allow_natives_syntax, false, "allow natives syntax")
+DEFINE_BOOL(parse_only, false, "only parse the sources")
 
 // simulator-arm.cc, simulator-arm64.cc and simulator-mips.cc
 DEFINE_BOOL(trace_sim, false, "Trace simulator execution")
@@ -1045,6 +1095,7 @@ DEFINE_BOOL(stack_trace_on_illegal, false,
             "print stack trace when an illegal exception is thrown")
 DEFINE_BOOL(abort_on_uncaught_exception, false,
             "abort program (dump core) when an uncaught exception is thrown")
+// TODO(jgruber,machenbach): Rename to --correctness-fuzzer-suppressions.
 DEFINE_BOOL(abort_on_stack_or_string_length_overflow, false,
             "Abort program when the stack overflows or a string exceeds "
             "maximum length (as opposed to throwing RangeError). This is "
@@ -1067,12 +1118,16 @@ DEFINE_INT(fuzzer_random_seed, 0,
 DEFINE_BOOL(trace_rail, false, "trace RAIL mode")
 DEFINE_BOOL(print_all_exceptions, false,
             "print exception object and stack trace on each thrown exception")
+DEFINE_BOOL(
+    detailed_error_stack_trace, false,
+    "includes arguments for each function call in the error stack frames array")
 
 // runtime.cc
 DEFINE_BOOL(runtime_call_stats, false, "report runtime call counts and times")
-DEFINE_INT(runtime_stats, 0,
-           "internal usage only for controlling runtime statistics")
-DEFINE_VALUE_IMPLICATION(runtime_call_stats, runtime_stats, 1)
+DEFINE_GENERIC_IMPLICATION(
+    runtime_call_stats,
+    TracingFlags::runtime_stats.store(
+        v8::tracing::TracingCategoryObserver::ENABLED_BY_NATIVE))
 
 // snapshot-common.cc
 #ifdef V8_EMBEDDED_BUILTINS
@@ -1092,6 +1147,7 @@ DEFINE_UINT(serialization_chunk_size, 4096,
 // Regexp
 DEFINE_BOOL(regexp_optimization, true, "generate optimized regexp code")
 DEFINE_BOOL(regexp_mode_modifiers, false, "enable inline flags in regexp.")
+DEFINE_BOOL(regexp_interpret_all, false,  "interpret all regexp code")
 
 // Testing flags test/cctest/test-{flags,api,serialization}.cc
 DEFINE_BOOL(testing_bool_flag, true, "testing_bool_flag")
@@ -1158,6 +1214,11 @@ DEFINE_BOOL(jitless, V8_LITE_BOOL,
 // Optimizations (i.e. jitting) are disabled.
 DEFINE_NEG_IMPLICATION(jitless, opt)
 #endif
+// Field representation tracking is only used by TurboFan.
+DEFINE_NEG_IMPLICATION(jitless, track_field_types)
+DEFINE_NEG_IMPLICATION(jitless, track_heap_object_fields)
+// Regexps are interpreted.
+DEFINE_IMPLICATION(jitless, regexp_interpret_all)
 // asm.js validation is disabled since it triggers wasm code generation.
 DEFINE_NEG_IMPLICATION(jitless, validate_asm)
 // Wasm is put into interpreter-only mode. We repeat flag implications down
@@ -1165,6 +1226,7 @@ DEFINE_NEG_IMPLICATION(jitless, validate_asm)
 DEFINE_IMPLICATION(jitless, wasm_interpret_all)
 DEFINE_NEG_IMPLICATION(jitless, asm_wasm_lazy_compilation)
 DEFINE_NEG_IMPLICATION(jitless, wasm_lazy_compilation)
+// --jitless also implies --no-expose-wasm, see InitializeOncePerProcessImpl.
 
 // Enable recompilation of function with optimized code.
 DEFINE_BOOL(opt, !V8_LITE_BOOL, "use adaptive optimizations")
@@ -1477,6 +1539,9 @@ DEFINE_BOOL(unbox_double_fields, V8_DOUBLE_FIELDS_UNBOXING,
             "enable in-object double fields unboxing (64-bit only)")
 DEFINE_IMPLICATION(unbox_double_fields, track_double_fields)
 
+DEFINE_BOOL(raw_heap_snapshots, V8_ENABLE_RAW_HEAP_SNAPSHOTS_BOOL,
+            "enable raw heap snapshots contain garbage collection internals")
+
 DEFINE_BOOL(lite_mode, V8_LITE_BOOL,
             "enables trade-off of performance for memory savings "
             "(Lite mode only)")
@@ -1497,6 +1562,7 @@ DEFINE_BOOL(lite_mode, V8_LITE_BOOL,
 #undef DEFINE_NEG_IMPLICATION
 #undef DEFINE_NEG_VALUE_IMPLICATION
 #undef DEFINE_VALUE_IMPLICATION
+#undef DEFINE_GENERIC_IMPLICATION
 #undef DEFINE_ALIAS_BOOL
 #undef DEFINE_ALIAS_INT
 #undef DEFINE_ALIAS_STRING
@@ -1507,5 +1573,6 @@ DEFINE_BOOL(lite_mode, V8_LITE_BOOL,
 #undef FLAG_MODE_DEFINE_DEFAULTS
 #undef FLAG_MODE_META
 #undef FLAG_MODE_DEFINE_IMPLICATIONS
+#undef FLAG_MODE_APPLY
 
 #undef COMMA

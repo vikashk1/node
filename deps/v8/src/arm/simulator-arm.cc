@@ -19,13 +19,15 @@
 #include "src/objects-inl.h"
 #include "src/ostreams.h"
 #include "src/runtime/runtime-utils.h"
+#include "src/utils.h"
+#include "src/vector.h"
 
 // Only build the simulator if not compiling for real ARM hardware.
 namespace v8 {
 namespace internal {
 
 DEFINE_LAZY_LEAKY_OBJECT_GETTER(Simulator::GlobalMonitor,
-                                Simulator::GlobalMonitor::Get);
+                                Simulator::GlobalMonitor::Get)
 
 // This macro provides a platform independent use of sscanf. The reason for
 // SScanF not being implemented in a platform independent way through
@@ -4179,6 +4181,9 @@ void CompareGreater(Simulator* simulator, int Vd, int Vm, int Vn, bool ge) {
   simulator->set_neon_register<T, SIZE>(Vd, src1);
 }
 
+float MinMax(float a, float b, bool is_min) {
+  return is_min ? JSMin(a, b) : JSMax(a, b);
+}
 template <typename T>
 T MinMax(T a, T b, bool is_min) {
   return is_min ? std::min(a, b) : std::max(a, b);

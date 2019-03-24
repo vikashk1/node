@@ -26,9 +26,7 @@ enum SmiCheck { INLINE_SMI_CHECK, OMIT_SMI_CHECK };
 
 class V8_EXPORT_PRIVATE TurboAssembler : public TurboAssemblerBase {
  public:
-  template <typename... Args>
-  explicit TurboAssembler(Args&&... args)
-      : TurboAssemblerBase(std::forward<Args>(args)...) {}
+  using TurboAssemblerBase::TurboAssemblerBase;
 
   void CheckPageFlag(Register object, Register scratch, int mask, Condition cc,
                      Label* condition_met,
@@ -284,6 +282,7 @@ class V8_EXPORT_PRIVATE TurboAssembler : public TurboAssemblerBase {
   AVX_OP3_XO(Punpckhbw, punpckhbw)
   AVX_OP3_XO(Pxor, pxor)
   AVX_OP3_XO(Andps, andps)
+  AVX_OP3_XO(Andnps, andnps)
   AVX_OP3_XO(Andpd, andpd)
   AVX_OP3_XO(Xorps, xorps)
   AVX_OP3_XO(Xorpd, xorpd)
@@ -430,9 +429,7 @@ class V8_EXPORT_PRIVATE TurboAssembler : public TurboAssemblerBase {
 // MacroAssembler implements a collection of frequently used macros.
 class V8_EXPORT_PRIVATE MacroAssembler : public TurboAssembler {
  public:
-  template <typename... Args>
-  explicit MacroAssembler(Args&&... args)
-      : TurboAssembler(std::forward<Args>(args)...) {}
+  using TurboAssembler::TurboAssembler;
 
   // Load a register with a long value as efficiently as possible.
   void Set(Register dst, int32_t x) {
@@ -459,6 +456,13 @@ class V8_EXPORT_PRIVATE MacroAssembler : public TurboAssembler {
     CompareRoot(with, index);
     j(not_equal, if_not_equal, if_not_equal_distance);
   }
+
+  // Checks if value is in range [lower_limit, higher_limit] using a single
+  // comparison.
+  void JumpIfIsInRange(Register value, unsigned lower_limit,
+                       unsigned higher_limit, Register scratch,
+                       Label* on_in_range,
+                       Label::Distance near_jump = Label::kFar);
 
   // ---------------------------------------------------------------------------
   // GC Support
@@ -684,11 +688,6 @@ class V8_EXPORT_PRIVATE MacroAssembler : public TurboAssembler {
 
   void LeaveExitFrameEpilogue();
 
-  // Helper for implementing JumpIfNotInNewSpace and JumpIfInNewSpace.
-  void InNewSpace(Register object, Register scratch, Condition cc,
-                  Label* condition_met,
-                  Label::Distance condition_met_distance = Label::kFar);
-
   // Compute memory operands for safepoint stack slots.
   static int SafepointRegisterStackIndex(int reg_code);
 
@@ -713,18 +712,12 @@ inline Operand FieldOperand(Register object, Register index, ScaleFactor scale,
   return Operand(object, index, scale, offset - kHeapObjectTag);
 }
 
-inline Operand FixedArrayElementOperand(Register array, Register index_as_smi,
-                                        int additional_offset = 0) {
-  int offset = FixedArray::kHeaderSize + additional_offset * kPointerSize;
-  return FieldOperand(array, index_as_smi, times_half_pointer_size, offset);
-}
-
 inline Operand ContextOperand(Register context, int index) {
   return Operand(context, Context::SlotOffset(index));
 }
 
 inline Operand ContextOperand(Register context, Register index) {
-  return Operand(context, index, times_pointer_size, Context::SlotOffset(0));
+  return Operand(context, index, times_tagged_size, Context::SlotOffset(0));
 }
 
 inline Operand NativeContextOperand() {

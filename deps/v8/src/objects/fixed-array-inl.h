@@ -7,15 +7,19 @@
 
 #include "src/objects/fixed-array.h"
 
+#include "src/base/tsan.h"
 #include "src/conversions.h"
 #include "src/handles-inl.h"
 #include "src/heap/heap-write-barrier-inl.h"
+#include "src/objects-inl.h"
 #include "src/objects/bigint.h"
+#include "src/objects/compressed-slots.h"
 #include "src/objects/heap-number-inl.h"
 #include "src/objects/map.h"
 #include "src/objects/maybe-object-inl.h"
 #include "src/objects/oddball.h"
 #include "src/objects/slots.h"
+#include "src/roots-inl.h"
 
 // Has to be the last include (doesn't have include guards):
 #include "src/objects/object-macros.h"
@@ -69,7 +73,7 @@ SYNCHRONIZED_SMI_ACCESSORS(WeakArrayList, capacity, kCapacityOffset)
 SMI_ACCESSORS(WeakArrayList, length, kLengthOffset)
 
 Object FixedArrayBase::unchecked_synchronized_length() const {
-  return ACQUIRE_READ_FIELD(this, kLengthOffset);
+  return ACQUIRE_READ_FIELD(*this, kLengthOffset);
 }
 
 ACCESSORS(FixedTypedArrayBase, base_pointer, Object, kBasePointerOffset)
@@ -90,7 +94,7 @@ bool FixedArray::ContainsOnlySmisOrHoles() {
 
 Object FixedArray::get(int index) const {
   DCHECK(index >= 0 && index < this->length());
-  return RELAXED_READ_FIELD(this, kHeaderSize + index * kTaggedSize);
+  return RELAXED_READ_FIELD(*this, kHeaderSize + index * kTaggedSize);
 }
 
 Handle<Object> FixedArray::get(FixedArray array, int index, Isolate* isolate) {
@@ -120,7 +124,7 @@ void FixedArray::set(int index, Smi value) {
   DCHECK_LT(index, this->length());
   DCHECK(Object(value).IsSmi());
   int offset = kHeaderSize + index * kTaggedSize;
-  RELAXED_WRITE_FIELD(this, offset, value);
+  RELAXED_WRITE_FIELD(*this, offset, value);
 }
 
 void FixedArray::set(int index, Object value) {
@@ -146,7 +150,7 @@ void FixedArray::NoWriteBarrierSet(FixedArray array, int index, Object value) {
   DCHECK_NE(array->map(), array->GetReadOnlyRoots().fixed_cow_array_map());
   DCHECK_GE(index, 0);
   DCHECK_LT(index, array->length());
-  DCHECK(!Heap::InNewSpace(value));
+  DCHECK(!ObjectInYoungGeneration(value));
   RELAXED_WRITE_FIELD(array, kHeaderSize + index * kTaggedSize, value);
 }
 
@@ -202,6 +206,12 @@ void FixedArray::MoveElements(Heap* heap, int dst_index, int src_index, int len,
                               WriteBarrierMode mode) {
   DisallowHeapAllocation no_gc;
   heap->MoveElements(*this, dst_index, src_index, len, mode);
+}
+
+void FixedArray::CopyElements(Heap* heap, int dst_index, FixedArray src,
+                              int src_index, int len, WriteBarrierMode mode) {
+  DisallowHeapAllocation no_gc;
+  heap->CopyElements(*this, src, dst_index, src_index, len, mode);
 }
 
 // Perform a binary search in a fixed array.
@@ -310,7 +320,7 @@ double FixedDoubleArray::get_scalar(int index) {
          map() != GetReadOnlyRoots().fixed_array_map());
   DCHECK(index >= 0 && index < this->length());
   DCHECK(!is_the_hole(index));
-  return READ_DOUBLE_FIELD(this, kHeaderSize + index * kDoubleSize);
+  return READ_DOUBLE_FIELD(*this, kHeaderSize + index * kDoubleSize);
 }
 
 uint64_t FixedDoubleArray::get_representation(int index) {
@@ -318,13 +328,13 @@ uint64_t FixedDoubleArray::get_representation(int index) {
          map() != GetReadOnlyRoots().fixed_array_map());
   DCHECK(index >= 0 && index < this->length());
   int offset = kHeaderSize + index * kDoubleSize;
-  return READ_UINT64_FIELD(this, offset);
+  return READ_UINT64_FIELD(*this, offset);
 }
 
 Handle<Object> FixedDoubleArray::get(FixedDoubleArray array, int index,
                                      Isolate* isolate) {
   if (array->is_the_hole(index)) {
-    return isolate->factory()->the_hole_value();
+    return ReadOnlyRoots(isolate).the_hole_value_handle();
   } else {
     return isolate->factory()->NewNumber(array->get_scalar(index));
   }
@@ -335,9 +345,9 @@ void FixedDoubleArray::set(int index, double value) {
          map() != GetReadOnlyRoots().fixed_array_map());
   int offset = kHeaderSize + index * kDoubleSize;
   if (std::isnan(value)) {
-    WRITE_DOUBLE_FIELD(this, offset, std::numeric_limits<double>::quiet_NaN());
+    WRITE_DOUBLE_FIELD(*this, offset, std::numeric_limits<double>::quiet_NaN());
   } else {
-    WRITE_DOUBLE_FIELD(this, offset, value);
+    WRITE_DOUBLE_FIELD(*this, offset, value);
   }
   DCHECK(!is_the_hole(index));
 }
@@ -350,7 +360,7 @@ void FixedDoubleArray::set_the_hole(int index) {
   DCHECK(map() != GetReadOnlyRoots().fixed_cow_array_map() &&
          map() != GetReadOnlyRoots().fixed_array_map());
   int offset = kHeaderSize + index * kDoubleSize;
-  WRITE_UINT64_FIELD(this, offset, kHoleNanInt64);
+  WRITE_UINT64_FIELD(*this, offset, kHoleNanInt64);
 }
 
 bool FixedDoubleArray::is_the_hole(Isolate* isolate, int index) {
@@ -464,46 +474,46 @@ int ByteArray::Size() { return RoundUp(length() + kHeaderSize, kTaggedSize); }
 
 byte ByteArray::get(int index) const {
   DCHECK(index >= 0 && index < this->length());
-  return READ_BYTE_FIELD(this, kHeaderSize + index * kCharSize);
+  return READ_BYTE_FIELD(*this, kHeaderSize + index * kCharSize);
 }
 
 void ByteArray::set(int index, byte value) {
   DCHECK(index >= 0 && index < this->length());
-  WRITE_BYTE_FIELD(this, kHeaderSize + index * kCharSize, value);
+  WRITE_BYTE_FIELD(*this, kHeaderSize + index * kCharSize, value);
 }
 
 void ByteArray::copy_in(int index, const byte* buffer, int length) {
   DCHECK(index >= 0 && length >= 0 && length <= kMaxInt - index &&
          index + length <= this->length());
-  Address dst_addr = FIELD_ADDR(this, kHeaderSize + index * kCharSize);
+  Address dst_addr = FIELD_ADDR(*this, kHeaderSize + index * kCharSize);
   memcpy(reinterpret_cast<void*>(dst_addr), buffer, length);
 }
 
 void ByteArray::copy_out(int index, byte* buffer, int length) {
   DCHECK(index >= 0 && length >= 0 && length <= kMaxInt - index &&
          index + length <= this->length());
-  Address src_addr = FIELD_ADDR(this, kHeaderSize + index * kCharSize);
+  Address src_addr = FIELD_ADDR(*this, kHeaderSize + index * kCharSize);
   memcpy(buffer, reinterpret_cast<void*>(src_addr), length);
 }
 
 int ByteArray::get_int(int index) const {
   DCHECK(index >= 0 && index < this->length() / kIntSize);
-  return READ_INT_FIELD(this, kHeaderSize + index * kIntSize);
+  return READ_INT_FIELD(*this, kHeaderSize + index * kIntSize);
 }
 
 void ByteArray::set_int(int index, int value) {
   DCHECK(index >= 0 && index < this->length() / kIntSize);
-  WRITE_INT_FIELD(this, kHeaderSize + index * kIntSize, value);
+  WRITE_INT_FIELD(*this, kHeaderSize + index * kIntSize, value);
 }
 
 uint32_t ByteArray::get_uint32(int index) const {
   DCHECK(index >= 0 && index < this->length() / kUInt32Size);
-  return READ_UINT32_FIELD(this, kHeaderSize + index * kUInt32Size);
+  return READ_UINT32_FIELD(*this, kHeaderSize + index * kUInt32Size);
 }
 
 void ByteArray::set_uint32(int index, uint32_t value) {
   DCHECK(index >= 0 && index < this->length() / kUInt32Size);
-  WRITE_UINT32_FIELD(this, kHeaderSize + index * kUInt32Size, value);
+  WRITE_UINT32_FIELD(*this, kHeaderSize + index * kUInt32Size, value);
 }
 
 void ByteArray::clear_padding() {
@@ -539,9 +549,9 @@ PodArray<T> PodArray<T>::cast(Object object) {
 // static
 template <class T>
 Handle<PodArray<T>> PodArray<T>::New(Isolate* isolate, int length,
-                                     PretenureFlag pretenure) {
+                                     AllocationType allocation) {
   return Handle<PodArray<T>>::cast(
-      isolate->factory()->NewByteArray(length * sizeof(T), pretenure));
+      isolate->factory()->NewByteArray(length * sizeof(T), allocation));
 }
 
 template <class T>
@@ -550,14 +560,13 @@ int PodArray<T>::length() const {
 }
 
 void* FixedTypedArrayBase::external_pointer() const {
-  intptr_t ptr = READ_INTPTR_FIELD(this, kExternalPointerOffset);
+  intptr_t ptr = READ_INTPTR_FIELD(*this, kExternalPointerOffset);
   return reinterpret_cast<void*>(ptr);
 }
 
-void FixedTypedArrayBase::set_external_pointer(void* value,
-                                               WriteBarrierMode mode) {
+void FixedTypedArrayBase::set_external_pointer(void* value) {
   intptr_t ptr = reinterpret_cast<intptr_t>(value);
-  WRITE_INTPTR_FIELD(this, kExternalPointerOffset, ptr);
+  WRITE_INTPTR_FIELD(*this, kExternalPointerOffset, ptr);
 }
 
 void* FixedTypedArrayBase::DataPtr() {
@@ -650,7 +659,17 @@ typename Traits::ElementType FixedTypedArray<Traits>::get_scalar_from_data_ptr(
   // JavaScript memory model to have tear-free reads of overlapping accesses,
   // and using relaxed atomics may introduce overhead.
   TSAN_ANNOTATE_IGNORE_READS_BEGIN;
-  auto result = ptr[index];
+  ElementType result;
+  if (COMPRESS_POINTERS_BOOL && alignof(ElementType) > kTaggedSize) {
+    // TODO(ishell, v8:8875): When pointer compression is enabled 8-byte size
+    // fields (external pointers, doubles and BigInt data) are only kTaggedSize
+    // aligned so we have to use unaligned pointer friendly way of accessing
+    // them in order to avoid undefined behavior in C++ code.
+    result = ReadUnalignedValue<ElementType>(reinterpret_cast<Address>(ptr) +
+                                             index * sizeof(ElementType));
+  } else {
+    result = ptr[index];
+  }
   TSAN_ANNOTATE_IGNORE_READS_END;
   return result;
 }
@@ -661,7 +680,16 @@ void FixedTypedArray<Traits>::set(int index, ElementType value) {
   // See the comment in FixedTypedArray<Traits>::get_scalar.
   auto* ptr = reinterpret_cast<ElementType*>(DataPtr());
   TSAN_ANNOTATE_IGNORE_WRITES_BEGIN;
-  ptr[index] = value;
+  if (COMPRESS_POINTERS_BOOL && alignof(ElementType) > kTaggedSize) {
+    // TODO(ishell, v8:8875): When pointer compression is enabled 8-byte size
+    // fields (external pointers, doubles and BigInt data) are only kTaggedSize
+    // aligned so we have to use unaligned pointer friendly way of accessing
+    // them in order to avoid undefined behavior in C++ code.
+    WriteUnalignedValue<ElementType>(
+        reinterpret_cast<Address>(ptr) + index * sizeof(ElementType), value);
+  } else {
+    ptr[index] = value;
+  }
   TSAN_ANNOTATE_IGNORE_WRITES_END;
 }
 
@@ -735,6 +763,9 @@ inline uint64_t FixedTypedArray<BigUint64ArrayTraits>::from(double value) {
 
 template <>
 inline float FixedTypedArray<Float32ArrayTraits>::from(double value) {
+  using limits = std::numeric_limits<float>;
+  if (value > limits::max()) return limits::infinity();
+  if (value < limits::lowest()) return -limits::infinity();
   return static_cast<float>(value);
 }
 

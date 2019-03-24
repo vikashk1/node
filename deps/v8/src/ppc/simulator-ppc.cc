@@ -27,7 +27,7 @@ namespace v8 {
 namespace internal {
 
 DEFINE_LAZY_LEAKY_OBJECT_GETTER(Simulator::GlobalMonitor,
-                                Simulator::GlobalMonitor::Get);
+                                Simulator::GlobalMonitor::Get)
 
 // This macro provides a platform independent use of sscanf. The reason for
 // SScanF not being implemented in a platform independent way through
@@ -883,7 +883,7 @@ void Simulator::TrashCallerSaveRegisters() {
     return WriteEx(addr, value);                                 \
   }
 
-RW_VAR_LIST(GENERATE_RW_FUNC);
+RW_VAR_LIST(GENERATE_RW_FUNC)
 #undef GENERATE_RW_FUNC
 
 // Returns the limit of the stack area to enable checking for stack overflows.
@@ -3982,7 +3982,7 @@ void Simulator::GlobalMonitor::NotifyStore(uintptr_t addr, TransactionSize size,
         tagged_addr_ + static_cast<uintptr_t>(size_);
     bool is_not_overlapped = transaction_end < exclusive_transaction_start ||
                              exclusive_transaction_end < transaction_start;
-    if (!is_not_overlapped && !thread_id_.Equals(thread_id)) {
+    if (!is_not_overlapped && thread_id_ != thread_id) {
       Clear();
     }
   }
@@ -3993,7 +3993,7 @@ bool Simulator::GlobalMonitor::NotifyStoreExcl(uintptr_t addr,
                                                ThreadId thread_id) {
   bool permission = access_state_ == MonitorAccess::Exclusive &&
                     addr == tagged_addr_ && size_ == size &&
-                    thread_id_.Equals(thread_id);
+                    thread_id_ == thread_id;
   // The reservation is cleared if the processor holding the reservation
   // executes a store conditional instruction to any address.
   Clear();

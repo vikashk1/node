@@ -984,8 +984,6 @@
   INTERNAL_TRACE_EVENT_ADD_WITH_ID(                                   \
       TRACE_EVENT_PHASE_LEAVE_CONTEXT, category_group, name, context, \
       TRACE_EVENT_FLAG_NONE)
-#define TRACE_EVENT_SCOPED_CONTEXT(category_group, name, context) \
-  INTERNAL_TRACE_EVENT_SCOPED_CONTEXT(category_group, name, context)
 
 // Macro to specify that two trace IDs are identical. For example,
 // TRACE_LINK_IDS(
@@ -1082,6 +1080,7 @@
 #define TRACE_EVENT_FLAG_HAS_PROCESS_ID (static_cast<unsigned int>(1 << 11))
 #define TRACE_EVENT_FLAG_HAS_LOCAL_ID (static_cast<unsigned int>(1 << 12))
 #define TRACE_EVENT_FLAG_HAS_GLOBAL_ID (static_cast<unsigned int>(1 << 13))
+#define TRACE_EVENT_FLAG_DISALLOW_POSTTASK (static_cast<unsigned int>(1 << 14))
 
 #define TRACE_EVENT_FLAG_SCOPE_MASK                          \
   (static_cast<unsigned int>(TRACE_EVENT_FLAG_SCOPE_OFFSET | \

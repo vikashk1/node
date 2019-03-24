@@ -11,7 +11,9 @@
 #include "src/base/compiler-specific.h"
 #include "src/flags.h"
 #include "src/signature.h"
+#include "src/utils.h"
 #include "src/v8memory.h"
+#include "src/vector.h"
 #include "src/wasm/wasm-result.h"
 #include "src/zone/zone-containers.h"
 
@@ -57,8 +59,7 @@ class Decoder {
 
   inline bool validate_size(const byte* pc, uint32_t length, const char* msg) {
     DCHECK_LE(start_, pc);
-    DCHECK_LE(pc, end_);
-    if (V8_UNLIKELY(length > static_cast<uint32_t>(end_ - pc))) {
+    if (V8_UNLIKELY(pc > end_ || length > static_cast<uint32_t>(end_ - pc))) {
       error(pc, msg);
       return false;
     }
@@ -334,14 +335,15 @@ class Decoder {
     static_assert(byte_index < kMaxLength, "invalid template instantiation");
     constexpr int shift = byte_index * 7;
     constexpr bool is_last_byte = byte_index == kMaxLength - 1;
-    DCHECK_LE(pc, end_);
-    const bool at_end = validate && pc == end_;
+    const bool at_end = validate && pc >= end_;
     byte b = 0;
     if (!at_end) {
       DCHECK_LT(pc, end_);
       b = *pc;
       TRACE_IF(trace, "%02x ", b);
-      result = result | ((static_cast<IntType>(b) & 0x7f) << shift);
+      typedef typename std::make_unsigned<IntType>::type Unsigned;
+      result = result |
+               (static_cast<Unsigned>(static_cast<IntType>(b) & 0x7f) << shift);
     }
     if (!is_last_byte && (b & 0x80)) {
       // Make sure that we only instantiate the template for valid byte indexes.

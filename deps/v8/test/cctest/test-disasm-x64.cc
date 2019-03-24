@@ -205,8 +205,7 @@ TEST(DisasmX64) {
   __ incq(Operand(rbx, rcx, times_4, 10000));
   __ pushq(Operand(rbx, rcx, times_4, 10000));
   __ popq(Operand(rbx, rcx, times_4, 10000));
-  // TODO(mstarzinger): The following is protected.
-  // __ jmp(Operand(rbx, rcx, times_4, 10000));
+  __ jmp(Operand(rbx, rcx, times_4, 10000));
 
   __ leaq(rdx, Operand(rbx, rcx, times_4, 10000));
   __ orq(rdx, Immediate(12345));
@@ -291,8 +290,7 @@ TEST(DisasmX64) {
   __ nop();
 
   __ jmp(&L1);
-  // TODO(mstarzinger): The following is protected.
-  // __ jmp(Operand(rbx, rcx, times_4, 10000));
+  __ jmp(Operand(rbx, rcx, times_4, 10000));
   __ jmp(ic, RelocInfo::CODE_TARGET);
   __ nop();
 
@@ -397,6 +395,8 @@ TEST(DisasmX64) {
     // logic operation
     __ andps(xmm0, xmm1);
     __ andps(xmm0, Operand(rbx, rcx, times_4, 10000));
+    __ andnps(xmm0, xmm1);
+    __ andnps(xmm0, Operand(rbx, rcx, times_4, 10000));
     __ orps(xmm0, xmm1);
     __ orps(xmm0, Operand(rbx, rcx, times_4, 10000));
     __ xorps(xmm0, xmm1);
@@ -686,6 +686,8 @@ TEST(DisasmX64) {
 
       __ vandps(xmm0, xmm9, xmm2);
       __ vandps(xmm9, xmm1, Operand(rbx, rcx, times_4, 10000));
+      __ vandnps(xmm0, xmm9, xmm2);
+      __ vandnps(xmm9, xmm1, Operand(rbx, rcx, times_4, 10000));
       __ vxorps(xmm0, xmm1, xmm9);
       __ vxorps(xmm0, xmm1, Operand(rbx, rcx, times_4, 10000));
       __ vhaddps(xmm0, xmm1, xmm9);

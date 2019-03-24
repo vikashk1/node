@@ -180,7 +180,7 @@ Handle<String> MessageHandler::GetMessage(Isolate* isolate,
                                           Handle<Object> data) {
   Handle<JSMessageObject> message = Handle<JSMessageObject>::cast(data);
   Handle<Object> arg = Handle<Object>(message->argument(), isolate);
-  return MessageFormatter::FormatMessage(isolate, message->type(), arg);
+  return MessageFormatter::Format(isolate, message->type(), arg);
 }
 
 std::unique_ptr<char[]> MessageHandler::GetLocalizedMessage(
@@ -294,9 +294,20 @@ Handle<Object> StackFrameBase::GetEvalOrigin() {
   return FormatEvalOrigin(isolate_, GetScript()).ToHandleChecked();
 }
 
+int StackFrameBase::GetScriptId() const {
+  if (!HasScript()) return kNone;
+  return GetScript()->id();
+}
+
 bool StackFrameBase::IsEval() {
   return HasScript() &&
          GetScript()->compilation_type() == Script::COMPILATION_TYPE_EVAL;
+}
+
+MaybeHandle<String> StackFrameBase::ToString() {
+  IncrementalStringBuilder builder(isolate_);
+  ToString(builder);
+  return builder.Finish();
 }
 
 void JSStackFrame::FromFrameArray(Isolate* isolate, Handle<FrameArray> array,
@@ -462,7 +473,7 @@ Handle<Object> JSStackFrame::GetTypeName() {
 int JSStackFrame::GetLineNumber() {
   DCHECK_LE(0, GetPosition());
   if (HasScript()) return Script::GetLineNumber(GetScript(), GetPosition()) + 1;
-  return -1;
+  return kNone;
 }
 
 int JSStackFrame::GetColumnNumber() {
@@ -470,11 +481,11 @@ int JSStackFrame::GetColumnNumber() {
   if (HasScript()) {
     return Script::GetColumnNumber(GetScript(), GetPosition()) + 1;
   }
-  return -1;
+  return kNone;
 }
 
 int JSStackFrame::GetPromiseIndex() const {
-  return is_promise_all_ ? offset_ : -1;
+  return is_promise_all_ ? offset_ : kNone;
 }
 
 bool JSStackFrame::IsNative() {
@@ -516,14 +527,14 @@ void AppendFileLocation(Isolate* isolate, StackFrameBase* call_site,
   }
 
   int line_number = call_site->GetLineNumber();
-  if (line_number != -1) {
+  if (line_number != StackFrameBase::kNone) {
     builder->AppendCharacter(':');
     Handle<String> line_string = isolate->factory()->NumberToString(
         handle(Smi::FromInt(line_number), isolate), isolate);
     builder->AppendString(line_string);
 
     int column_number = call_site->GetColumnNumber();
-    if (column_number != -1) {
+    if (column_number != StackFrameBase::kNone) {
       builder->AppendCharacter(':');
       Handle<String> column_string = isolate->factory()->NumberToString(
           handle(Smi::FromInt(column_number), isolate), isolate);
@@ -611,9 +622,7 @@ void AppendMethodCall(Isolate* isolate, JSStackFrame* call_site,
 
 }  // namespace
 
-MaybeHandle<String> JSStackFrame::ToString() {
-  IncrementalStringBuilder builder(isolate_);
-
+void JSStackFrame::ToString(IncrementalStringBuilder& builder) {
   Handle<Object> function_name = GetFunctionName();
 
   const bool is_toplevel = IsToplevel();
@@ -633,7 +642,7 @@ MaybeHandle<String> JSStackFrame::ToString() {
         handle(Smi::FromInt(offset_), isolate_), isolate_);
     builder.AppendString(index_string);
     builder.AppendCString(")");
-    return builder.Finish();
+    return;
   }
   if (is_method_call) {
     AppendMethodCall(isolate_, this, &builder);
@@ -648,14 +657,14 @@ MaybeHandle<String> JSStackFrame::ToString() {
     builder.AppendString(Handle<String>::cast(function_name));
   } else {
     AppendFileLocation(isolate_, this, &builder);
-    return builder.Finish();
+    return;
   }
 
   builder.AppendCString(" (");
   AppendFileLocation(isolate_, this, &builder);
   builder.AppendCString(")");
 
-  return builder.Finish();
+  return;
 }
 
 int JSStackFrame::GetPosition() const { return code_->SourcePosition(offset_); }
@@ -705,9 +714,7 @@ Handle<Object> WasmStackFrame::GetFunctionName() {
   return name;
 }
 
-MaybeHandle<String> WasmStackFrame::ToString() {
-  IncrementalStringBuilder builder(isolate_);
-
+void WasmStackFrame::ToString(IncrementalStringBuilder& builder) {
   Handle<WasmModuleObject> module_object(wasm_instance_->module_object(),
                                          isolate_);
   MaybeHandle<String> module_name =
@@ -739,7 +746,7 @@ MaybeHandle<String> WasmStackFrame::ToString() {
 
   if (has_name) builder.AppendCString(")");
 
-  return builder.Finish();
+  return;
 }
 
 int WasmStackFrame::GetPosition() const {
@@ -816,12 +823,10 @@ int AsmJsWasmStackFrame::GetColumnNumber() {
   return Script::GetColumnNumber(script, GetPosition()) + 1;
 }
 
-MaybeHandle<String> AsmJsWasmStackFrame::ToString() {
+void AsmJsWasmStackFrame::ToString(IncrementalStringBuilder& builder) {
   // The string should look exactly as the respective javascript frame string.
-  // Keep this method in line to JSStackFrame::ToString().
-
-  IncrementalStringBuilder builder(isolate_);
-
+  // Keep this method in line to
+  // JSStackFrame::ToString(IncrementalStringBuilder&).
   Handle<Object> function_name = GetFunctionName();
 
   if (IsNonEmptyString(function_name)) {
@@ -833,38 +838,38 @@ MaybeHandle<String> AsmJsWasmStackFrame::ToString() {
 
   if (IsNonEmptyString(function_name)) builder.AppendCString(")");
 
-  return builder.Finish();
+  return;
 }
 
 FrameArrayIterator::FrameArrayIterator(Isolate* isolate,
                                        Handle<FrameArray> array, int frame_ix)
-    : isolate_(isolate), array_(array), next_frame_ix_(frame_ix) {}
+    : isolate_(isolate), array_(array), frame_ix_(frame_ix) {}
 
-bool FrameArrayIterator::HasNext() const {
-  return (next_frame_ix_ < array_->FrameCount());
+bool FrameArrayIterator::HasFrame() const {
+  return (frame_ix_ < array_->FrameCount());
 }
 
-void FrameArrayIterator::Next() { next_frame_ix_++; }
+void FrameArrayIterator::Advance() { frame_ix_++; }
 
 StackFrameBase* FrameArrayIterator::Frame() {
-  DCHECK(HasNext());
-  const int flags = array_->Flags(next_frame_ix_)->value();
+  DCHECK(HasFrame());
+  const int flags = array_->Flags(frame_ix_)->value();
   int flag_mask = FrameArray::kIsWasmFrame |
                   FrameArray::kIsWasmInterpretedFrame |
                   FrameArray::kIsAsmJsWasmFrame;
   switch (flags & flag_mask) {
     case 0:
       // JavaScript Frame.
-      js_frame_.FromFrameArray(isolate_, array_, next_frame_ix_);
+      js_frame_.FromFrameArray(isolate_, array_, frame_ix_);
       return &js_frame_;
     case FrameArray::kIsWasmFrame:
     case FrameArray::kIsWasmInterpretedFrame:
       // Wasm Frame:
-      wasm_frame_.FromFrameArray(isolate_, array_, next_frame_ix_);
+      wasm_frame_.FromFrameArray(isolate_, array_, frame_ix_);
       return &wasm_frame_;
     case FrameArray::kIsAsmJsWasmFrame:
       // Asm.js Wasm Frame:
-      asm_wasm_frame_.FromFrameArray(isolate_, array_, next_frame_ix_);
+      asm_wasm_frame_.FromFrameArray(isolate_, array_, frame_ix_);
       return &asm_wasm_frame_;
     default:
       UNREACHABLE();
@@ -1040,47 +1045,44 @@ MaybeHandle<Object> ErrorUtils::FormatStackTrace(Isolate* isolate,
   RETURN_ON_EXCEPTION(isolate, AppendErrorString(isolate, error, &builder),
                       Object);
 
-  for (FrameArrayIterator it(isolate, elems); it.HasNext(); it.Next()) {
+  for (FrameArrayIterator it(isolate, elems); it.HasFrame(); it.Advance()) {
     builder.AppendCString("\n    at ");
 
     StackFrameBase* frame = it.Frame();
-    MaybeHandle<String> maybe_frame_string = frame->ToString();
-    if (maybe_frame_string.is_null()) {
-      // CallSite.toString threw. Try to return a string representation of the
-      // thrown exception instead.
+    frame->ToString(builder);
+    if (isolate->has_pending_exception()) {
+      // CallSite.toString threw. Parts of the current frame might have been
+      // stringified already regardless. Still, try to append a string
+      // representation of the thrown exception.
 
-      DCHECK(isolate->has_pending_exception());
       Handle<Object> pending_exception =
           handle(isolate->pending_exception(), isolate);
       isolate->clear_pending_exception();
       isolate->set_external_caught_exception(false);
 
-      maybe_frame_string = ErrorUtils::ToString(isolate, pending_exception);
-      if (maybe_frame_string.is_null()) {
+      MaybeHandle<String> exception_string =
+          ErrorUtils::ToString(isolate, pending_exception);
+      if (exception_string.is_null()) {
         // Formatting the thrown exception threw again, give up.
 
         builder.AppendCString("<error>");
       } else {
         // Formatted thrown exception successfully, append it.
         builder.AppendCString("<error: ");
-        builder.AppendString(maybe_frame_string.ToHandleChecked());
+        builder.AppendString(exception_string.ToHandleChecked());
         builder.AppendCString("<error>");
       }
-    } else {
-      // CallSite.toString completed without throwing.
-      builder.AppendString(maybe_frame_string.ToHandleChecked());
     }
   }
 
   return builder.Finish();
 }
 
-Handle<String> MessageFormatter::FormatMessage(Isolate* isolate,
-                                               MessageTemplate index,
-                                               Handle<Object> arg) {
+Handle<String> MessageFormatter::Format(Isolate* isolate, MessageTemplate index,
+                                        Handle<Object> arg) {
   Factory* factory = isolate->factory();
   Handle<String> result_string = Object::NoSideEffectsToString(isolate, arg);
-  MaybeHandle<String> maybe_result_string = MessageFormatter::FormatMessage(
+  MaybeHandle<String> maybe_result_string = MessageFormatter::Format(
       isolate, index, result_string, factory->empty_string(),
       factory->empty_string());
   if (!maybe_result_string.ToHandle(&result_string)) {
@@ -1109,11 +1111,11 @@ const char* MessageFormatter::TemplateString(MessageTemplate index) {
   }
 }
 
-MaybeHandle<String> MessageFormatter::FormatMessage(Isolate* isolate,
-                                                    MessageTemplate index,
-                                                    Handle<String> arg0,
-                                                    Handle<String> arg1,
-                                                    Handle<String> arg2) {
+MaybeHandle<String> MessageFormatter::Format(Isolate* isolate,
+                                             MessageTemplate index,
+                                             Handle<String> arg0,
+                                             Handle<String> arg1,
+                                             Handle<String> arg2) {
   const char* template_string = TemplateString(index);
   if (template_string == nullptr) {
     isolate->ThrowIllegalOperation();
@@ -1270,9 +1272,9 @@ MaybeHandle<String> ErrorUtils::ToString(Isolate* isolate,
 
 namespace {
 
-Handle<String> FormatMessage(Isolate* isolate, MessageTemplate index,
-                             Handle<Object> arg0, Handle<Object> arg1,
-                             Handle<Object> arg2) {
+Handle<String> DoFormatMessage(Isolate* isolate, MessageTemplate index,
+                               Handle<Object> arg0, Handle<Object> arg1,
+                               Handle<Object> arg2) {
   Handle<String> arg0_str = Object::NoSideEffectsToString(isolate, arg0);
   Handle<String> arg1_str = Object::NoSideEffectsToString(isolate, arg1);
   Handle<String> arg2_str = Object::NoSideEffectsToString(isolate, arg2);
@@ -1280,8 +1282,7 @@ Handle<String> FormatMessage(Isolate* isolate, MessageTemplate index,
   isolate->native_context()->IncrementErrorsThrown();
 
   Handle<String> msg;
-  if (!MessageFormatter::FormatMessage(isolate, index, arg0_str, arg1_str,
-                                       arg2_str)
+  if (!MessageFormatter::Format(isolate, index, arg0_str, arg1_str, arg2_str)
            .ToHandle(&msg)) {
     DCHECK(isolate->has_pending_exception());
     isolate->clear_pending_exception();
@@ -1309,7 +1310,7 @@ MaybeHandle<Object> ErrorUtils::MakeGenericError(
   DCHECK(mode != SKIP_UNTIL_SEEN);
 
   Handle<Object> no_caller;
-  Handle<String> msg = FormatMessage(isolate, index, arg0, arg1, arg2);
+  Handle<String> msg = DoFormatMessage(isolate, index, arg0, arg1, arg2);
   return ErrorUtils::Construct(isolate, constructor, constructor, msg, mode,
                                no_caller, false);
 }

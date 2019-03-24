@@ -119,6 +119,17 @@ int CallDescriptor::GetStackParameterDelta(
   return stack_param_delta;
 }
 
+int CallDescriptor::GetTaggedParameterSlots() const {
+  int result = 0;
+  for (size_t i = 0; i < InputCount(); ++i) {
+    LinkageLocation operand = GetInputLocation(i);
+    if (!operand.IsRegister() && operand.GetType().IsTagged()) {
+      ++result;
+    }
+  }
+  return result;
+}
+
 bool CallDescriptor::CanTailCall(const Node* node) const {
   return HasSameReturnLocationsAs(CallDescriptorOf(node->op()));
 }
@@ -164,7 +175,7 @@ bool Linkage::NeedsFrameStateInput(Runtime::FunctionId function) {
     // not to call into arbitrary JavaScript, not to throw, and not to lazily
     // deoptimize are whitelisted here and can be called without a FrameState.
     case Runtime::kAbort:
-    case Runtime::kAllocateInTargetSpace:
+    case Runtime::kAllocateInOldGeneration:
     case Runtime::kCreateIterResultObject:
     case Runtime::kIncBlockCounter:
     case Runtime::kIsFunction:

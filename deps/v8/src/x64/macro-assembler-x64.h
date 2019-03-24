@@ -87,9 +87,7 @@ class StackArgumentsAccessor {
 
 class V8_EXPORT_PRIVATE TurboAssembler : public TurboAssemblerBase {
  public:
-  template <typename... Args>
-  explicit TurboAssembler(Args&&... args)
-      : TurboAssemblerBase(std::forward<Args>(args)...) {}
+  using TurboAssemblerBase::TurboAssemblerBase;
 
   template <typename Dst, typename... Args>
   struct AvxHelper {
@@ -149,6 +147,7 @@ class V8_EXPORT_PRIVATE TurboAssembler : public TurboAssemblerBase {
   AVX_OP(Addsd, addsd)
   AVX_OP(Mulsd, mulsd)
   AVX_OP(Andps, andps)
+  AVX_OP(Andnps, andnps)
   AVX_OP(Andpd, andpd)
   AVX_OP(Orpd, orpd)
   AVX_OP(Cmpeqps, cmpeqps)
@@ -189,7 +188,7 @@ class V8_EXPORT_PRIVATE TurboAssembler : public TurboAssemblerBase {
   void LoadRoot(Register destination, RootIndex index) override;
   void LoadRoot(Operand destination, RootIndex index) {
     LoadRoot(kScratchRegister, index);
-    movp(destination, kScratchRegister);
+    movq(destination, kScratchRegister);
   }
 
   void Push(Register src);
@@ -295,7 +294,7 @@ class V8_EXPORT_PRIVATE TurboAssembler : public TurboAssemblerBase {
 
   void Move(Operand dst, Smi source) {
     Register constant = GetSmiConstant(source);
-    movp(dst, constant);
+    movq(dst, constant);
   }
 
   void Move(Register dst, ExternalReference ext);
@@ -318,8 +317,11 @@ class V8_EXPORT_PRIVATE TurboAssembler : public TurboAssemblerBase {
     // This method must not be used with heap object references. The stored
     // address is not GC safe. Use the handle version instead.
     DCHECK(rmode > RelocInfo::LAST_GCED_ENUM);
-    movp(dst, ptr, rmode);
+    movq(dst, Immediate64(ptr, rmode));
   }
+
+  // Move src0 to dst0 and src1 to dst1, handling possible overlaps.
+  void MovePair(Register dst0, Register src0, Register dst1, Register src1);
 
   void MoveStringConstant(Register result, const StringConstantBase* string,
                           RelocInfo::Mode rmode = RelocInfo::EMBEDDED_OBJECT);
@@ -475,47 +477,40 @@ class V8_EXPORT_PRIVATE TurboAssembler : public TurboAssemblerBase {
   // ---------------------------------------------------------------------------
   // Pointer compression support
 
-  // TODO(ishell): remove |scratch_for_debug| once pointer compression works.
-
   // Loads a field containing a HeapObject and decompresses it if pointer
   // compression is enabled.
-  void LoadTaggedPointerField(Register destination, Operand field_operand,
-                              Register scratch_for_debug = no_reg);
+  void LoadTaggedPointerField(Register destination, Operand field_operand);
 
   // Loads a field containing any tagged value and decompresses it if necessary.
   // When pointer compression is enabled, uses |scratch| to decompress the
   // value.
   void LoadAnyTaggedField(Register destination, Operand field_operand,
-                          Register scratch,
-                          Register scratch_for_debug = no_reg);
+                          Register scratch = kScratchRegister);
 
   // Loads a field containing a HeapObject, decompresses it if necessary and
   // pushes full pointer to the stack. When pointer compression is enabled,
   // uses |scratch| to decompress the value.
-  void PushTaggedPointerField(Operand field_operand, Register scratch,
-                              Register scratch_for_debug = no_reg);
+  void PushTaggedPointerField(Operand field_operand, Register scratch);
 
   // Loads a field containing any tagged value, decompresses it if necessary and
   // pushes the full pointer to the stack. When pointer compression is enabled,
   // uses |scratch1| and |scratch2| to decompress the value.
   void PushTaggedAnyField(Operand field_operand, Register scratch1,
-                          Register scratch2,
-                          Register scratch_for_debug = no_reg);
+                          Register scratch2);
 
   // Loads a field containing smi value and untags it.
   void SmiUntagField(Register dst, Operand src);
 
-  // Compresses and stores tagged value to given on-heap location.
-  // TODO(ishell): drop once mov_tagged() can be used.
+  // Compresses tagged value if necessary and stores it to given on-heap
+  // location.
   void StoreTaggedField(Operand dst_field_operand, Immediate immediate);
   void StoreTaggedField(Operand dst_field_operand, Register value);
 
-  void DecompressTaggedSigned(Register destination, Operand field_operand,
-                              Register scratch_for_debug);
-  void DecompressTaggedPointer(Register destination, Operand field_operand,
-                               Register scratch_for_debug);
+  // The following macros work even when pointer compression is not enabled.
+  void DecompressTaggedSigned(Register destination, Operand field_operand);
+  void DecompressTaggedPointer(Register destination, Operand field_operand);
   void DecompressAnyTagged(Register destination, Operand field_operand,
-                           Register scratch, Register scratch_for_debug);
+                           Register scratch = kScratchRegister);
 
  protected:
   static const int kSmiShift = kSmiTagSize + kSmiShiftSize;
@@ -535,9 +530,7 @@ class V8_EXPORT_PRIVATE TurboAssembler : public TurboAssemblerBase {
 // MacroAssembler implements a collection of frequently used macros.
 class V8_EXPORT_PRIVATE MacroAssembler : public TurboAssembler {
  public:
-  template <typename... Args>
-  explicit MacroAssembler(Args&&... args)
-      : TurboAssembler(std::forward<Args>(args)...) {}
+  using TurboAssembler::TurboAssembler;
 
   // Loads and stores the value of an external reference.
   // Special case code for load and store to take advantage of
@@ -711,14 +704,16 @@ class V8_EXPORT_PRIVATE MacroAssembler : public TurboAssembler {
   // ---------------------------------------------------------------------------
   // Macro instructions.
 
-  // Load/store with specific representation.
-  void Load(Register dst, Operand src, Representation r);
-  void Store(Operand dst, Register src, Representation r);
-
   void Cmp(Register dst, Handle<Object> source);
   void Cmp(Operand dst, Handle<Object> source);
   void Cmp(Register dst, Smi src);
   void Cmp(Operand dst, Smi src);
+
+  // Checks if value is in range [lower_limit, higher_limit] using a single
+  // comparison.
+  void JumpIfIsInRange(Register value, unsigned lower_limit,
+                       unsigned higher_limit, Label* on_in_range,
+                       Label::Distance near_jump = Label::kFar);
 
   // Emit code to discard a non-negative number of pointer-sized elements
   // from the stack, clobbering only the rsp register.
@@ -770,9 +765,9 @@ class V8_EXPORT_PRIVATE MacroAssembler : public TurboAssembler {
     static const int shift = Field::kShift;
     static const int mask = Field::kMask >> Field::kShift;
     if (shift != 0) {
-      shrp(reg, Immediate(shift));
+      shrq(reg, Immediate(shift));
     }
-    andp(reg, Immediate(mask));
+    andq(reg, Immediate(mask));
   }
 
   // Abort execution if argument is a smi, enabled via --debug-code.
@@ -884,13 +879,6 @@ class V8_EXPORT_PRIVATE MacroAssembler : public TurboAssembler {
 
   void LeaveExitFrameEpilogue();
 
-  // Helper for implementing JumpIfNotInNewSpace and JumpIfInNewSpace.
-  void InNewSpace(Register object,
-                  Register scratch,
-                  Condition cc,
-                  Label* branch,
-                  Label::Distance distance = Label::kFar);
-
   // Compute memory operands for safepoint stack slots.
   static int SafepointRegisterStackIndex(int reg_code) {
     return kNumSafepointRegisters - kSafepointPushRegisterIndices[reg_code] - 1;
@@ -927,7 +915,8 @@ inline Operand ContextOperand(Register context, int index) {
 
 
 inline Operand ContextOperand(Register context, Register index) {
-  return Operand(context, index, times_pointer_size, Context::SlotOffset(0));
+  return Operand(context, index, times_system_pointer_size,
+                 Context::SlotOffset(0));
 }
 
 

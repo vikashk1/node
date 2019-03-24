@@ -69,8 +69,8 @@ Node* RawMachineAssembler::RelocatableIntPtrConstant(intptr_t value,
 }
 
 Node* RawMachineAssembler::OptimizedAllocate(Node* size,
-                                             PretenureFlag pretenure) {
-  return AddNode(simplified()->AllocateRaw(Type::Any(), pretenure), size);
+                                             AllocationType allocation) {
+  return AddNode(simplified()->AllocateRaw(Type::Any(), allocation), size);
 }
 
 Schedule* RawMachineAssembler::Export() {
@@ -564,7 +564,7 @@ void RawMachineAssembler::Unreachable() {
   current_block_ = nullptr;
 }
 
-void RawMachineAssembler::Comment(std::string msg) {
+void RawMachineAssembler::Comment(const std::string& msg) {
   size_t length = msg.length() + 1;
   char* zone_buffer = zone()->NewArray<char>(length);
   MemCopy(zone_buffer, msg.c_str(), length);

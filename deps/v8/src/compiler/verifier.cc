@@ -166,6 +166,7 @@ void Verifier::Visitor::Check(Node* node, const AllNodes& all) {
     if (!node->op()->HasProperty(Operator::kNoThrow)) {
       Node* discovered_if_exception = nullptr;
       Node* discovered_if_success = nullptr;
+      Node* discovered_direct_use = nullptr;
       int total_number_of_control_uses = 0;
       for (Edge edge : node->use_edges()) {
         if (!NodeProperties::IsControlEdge(edge)) {
@@ -176,10 +177,11 @@ void Verifier::Visitor::Check(Node* node, const AllNodes& all) {
         if (control_use->opcode() == IrOpcode::kIfSuccess) {
           CHECK_NULL(discovered_if_success);  // Only one allowed.
           discovered_if_success = control_use;
-        }
-        if (control_use->opcode() == IrOpcode::kIfException) {
+        } else if (control_use->opcode() == IrOpcode::kIfException) {
           CHECK_NULL(discovered_if_exception);  // Only one allowed.
           discovered_if_exception = control_use;
+        } else {
+          discovered_direct_use = control_use;
         }
       }
       if (discovered_if_success && !discovered_if_exception) {
@@ -196,8 +198,13 @@ void Verifier::Visitor::Check(Node* node, const AllNodes& all) {
             node->id(), node->op()->mnemonic(), discovered_if_exception->id(),
             discovered_if_exception->op()->mnemonic());
       }
-      if (discovered_if_success || discovered_if_exception) {
-        CHECK_EQ(2, total_number_of_control_uses);
+      if ((discovered_if_success || discovered_if_exception) &&
+          total_number_of_control_uses != 2) {
+        FATAL(
+            "#%d:%s if followed by IfSuccess/IfException, there should be "
+            "no direct control uses, but direct use #%d:%s was found",
+            node->id(), node->op()->mnemonic(), discovered_direct_use->id(),
+            discovered_direct_use->op()->mnemonic());
       }
     }
   }
@@ -1263,10 +1270,8 @@ void Verifier::Visitor::Check(Node* node, const AllNodes& all) {
       CheckTypeIs(node, Type::OtherInternal());
       break;
     case IrOpcode::kNewConsString:
-      CheckValueInputIs(node, 0, TypeCache::Get()->kStringLengthType);
-      CheckValueInputIs(node, 1, Type::String());
-      CheckValueInputIs(node, 2, Type::String());
-      CheckTypeIs(node, Type::String());
+    case IrOpcode::kNewConsOneByteString:
+    case IrOpcode::kNewConsTwoByteString:
       break;
     case IrOpcode::kDelayedStringConstant:
       CheckTypeIs(node, Type::String());
@@ -1439,6 +1444,18 @@ void Verifier::Visitor::Check(Node* node, const AllNodes& all) {
       CheckValueInputIs(node, 0, Type::Any());
       CheckTypeIs(node, Type::InternalizedString());
       break;
+    case IrOpcode::kCheckNonEmptyString:
+      CheckValueInputIs(node, 0, Type::Any());
+      CheckTypeIs(node, Type::NonEmptyString());
+      break;
+    case IrOpcode::kCheckNonEmptyOneByteString:
+      CheckValueInputIs(node, 0, Type::Any());
+      CheckTypeIs(node, Type::NonEmptyOneByteString());
+      break;
+    case IrOpcode::kCheckNonEmptyTwoByteString:
+      CheckValueInputIs(node, 0, Type::Any());
+      CheckTypeIs(node, Type::NonEmptyTwoByteString());
+      break;
     case IrOpcode::kCheckMaps:
       CheckValueInputIs(node, 0, Type::Any());
       CheckNotTyped(node);
@@ -1534,12 +1551,14 @@ void Verifier::Visitor::Check(Node* node, const AllNodes& all) {
       CheckTypeIs(node, Type::NonInternal());
       break;
     case IrOpcode::kLoadField:
+    case IrOpcode::kLoadMessage:
       // Object -> fieldtype
       // TODO(rossberg): activate once machine ops are typed.
       // CheckValueInputIs(node, 0, Type::Object());
       // CheckTypeIs(node, FieldAccessOf(node->op()).type));
       break;
     case IrOpcode::kLoadElement:
+    case IrOpcode::kLoadStackArgument:
       // Object -> elementtype
       // TODO(rossberg): activate once machine ops are typed.
       // CheckValueInputIs(node, 0, Type::Object());
@@ -1550,6 +1569,7 @@ void Verifier::Visitor::Check(Node* node, const AllNodes& all) {
     case IrOpcode::kLoadDataViewElement:
       break;
     case IrOpcode::kStoreField:
+    case IrOpcode::kStoreMessage:
       // (Object, fieldtype) -> _|_
       // TODO(rossberg): activate once machine ops are typed.
       // CheckValueInputIs(node, 0, Type::Object());
@@ -1735,6 +1755,12 @@ void Verifier::Visitor::Check(Node* node, const AllNodes& all) {
     case IrOpcode::kBitcastWordToTaggedSigned:
     case IrOpcode::kChangeInt32ToInt64:
     case IrOpcode::kChangeUint32ToUint64:
+    case IrOpcode::kChangeTaggedToCompressed:
+    case IrOpcode::kChangeTaggedPointerToCompressedPointer:
+    case IrOpcode::kChangeTaggedSignedToCompressedSigned:
+    case IrOpcode::kChangeCompressedToTagged:
+    case IrOpcode::kChangeCompressedPointerToTaggedPointer:
+    case IrOpcode::kChangeCompressedSignedToTaggedSigned:
     case IrOpcode::kChangeInt32ToFloat64:
     case IrOpcode::kChangeInt64ToFloat64:
     case IrOpcode::kChangeUint32ToFloat64:
@@ -1797,7 +1823,6 @@ void Verifier::Visitor::Check(Node* node, const AllNodes& all) {
     case IrOpcode::kWord32AtomicPairXor:
     case IrOpcode::kWord32AtomicPairExchange:
     case IrOpcode::kWord32AtomicPairCompareExchange:
-    case IrOpcode::kSpeculationFence:
     case IrOpcode::kSignExtendWord8ToInt32:
     case IrOpcode::kSignExtendWord16ToInt32:
     case IrOpcode::kSignExtendWord8ToInt64:
