@@ -123,6 +123,10 @@
     # Enables various testing features.
     'v8_enable_test_features%': 0,
 
+    # Enables raw heap snapshots containing internals. Used for debugging memory
+    # on platform and embedder level.
+    'v8_enable_raw_heap_snapshots%': 0,
+
     # With post mortem support enabled, metadata is embedded into libv8 that
     # describes various parameters of the VM for use by debuggers. See
     # tools/gen-postmortem-metadata.py for details.
@@ -169,6 +173,9 @@
       }],
       ['v8_promise_internal_field_count!=0', {
         'defines': ['V8_PROMISE_INTERNAL_FIELD_COUNT=<(v8_promise_internal_field_count)'],
+      }],
+      ['v8_enable_raw_heap_snapshots==1', {
+        'defines': ['V8_ENABLE_RAW_HEAP_SNAPSHOTS',],
       }],
       ['v8_enable_future==1', {
         'defines': ['V8_ENABLE_FUTURE',],
