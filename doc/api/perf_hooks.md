@@ -183,7 +183,7 @@ added: v8.5.0
 * {string}
 
 The type of the performance entry. Currently it may be one of: `'node'`,
-`'mark'`, `'measure'`, `'gc'`, `'function'`, or `'http2'`.
+`'mark'`, `'measure'`, `'gc'`, `'function'`, `'http2'` or `'http'`.
 
 ### performanceEntry.kind
 <!-- YAML
@@ -218,6 +218,16 @@ added: v8.5.0
 The high resolution millisecond timestamp at which the Node.js process
 completed bootstrapping. If bootstrapping has not yet finished, the property
 has the value of -1.
+
+### performanceNodeTiming.environment
+<!-- YAML
+added: v8.5.0
+-->
+
+* {number}
+
+The high resolution millisecond timestamp at which the Node.js environment was
+initialized.
 
 ### performanceNodeTiming.loopExit
 <!-- YAML
@@ -409,7 +419,7 @@ added: v11.10.0
 * Returns: {Histogram}
 
 Creates a `Histogram` object that samples and reports the event loop delay
-over time.
+over time. The delays will be reported in nanoseconds.
 
 Using a timer to detect approximate event loop delay works because the
 execution of timers is tied specifically to the lifecycle of the libuv

@@ -2,8 +2,6 @@
 #include "main_thread_interface.h"
 #include "node_internals.h"
 #include "node_v8_platform-inl.h"
-
-#include "env-inl.h"
 #include "v8.h"
 
 #include <set>
@@ -72,7 +70,7 @@ class SendMessageRequest : public Request {
     if (frontend_wrapper == nullptr) return;
     auto frontend = frontend_wrapper->get();
     if (frontend != nullptr) {
-      frontend->sendRawNotification(message_);
+      frontend->sendRawJSONNotification(message_);
     }
   }
 

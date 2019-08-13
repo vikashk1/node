@@ -7,8 +7,8 @@
 
 #include "src/base/compiler-specific.h"
 #include "src/compiler/simplified-operator.h"
-#include "src/elements-kind.h"
-#include "src/globals.h"
+#include "src/compiler/write-barrier-kind.h"
+#include "src/objects/elements-kind.h"
 #include "src/objects/js-objects.h"
 
 namespace v8 {
@@ -137,6 +137,15 @@ class V8_EXPORT_PRIVATE AccessBuilder final
   // Provides access to JSTypedArray::length() field.
   static FieldAccess ForJSTypedArrayLength();
 
+  // Provides access to JSTypedArray::base_pointer() field.
+  static FieldAccess ForJSTypedArrayBasePointer();
+
+  // Provides access to JSTypedArray::external_pointer() field.
+  static FieldAccess ForJSTypedArrayExternalPointer();
+
+  // Provides access to JSDataView::data_pointer() field.
+  static FieldAccess ForJSDataViewDataPointer();
+
   // Provides access to JSDate::value() field.
   static FieldAccess ForJSDateValue();
 
@@ -166,12 +175,6 @@ class V8_EXPORT_PRIVATE AccessBuilder final
 
   // Provides access to PropertyArray::length() field.
   static FieldAccess ForPropertyArrayLengthAndHash();
-
-  // Provides access to FixedTypedArrayBase::base_pointer() field.
-  static FieldAccess ForFixedTypedArrayBaseBasePointer();
-
-  // Provides access to FixedTypedArrayBase::external_pointer() field.
-  static FieldAccess ForFixedTypedArrayBaseExternalPointer();
 
   // Provides access to DescriptorArray::enum_cache() field.
   static FieldAccess ForDescriptorArrayEnumCache();
@@ -282,6 +285,9 @@ class V8_EXPORT_PRIVATE AccessBuilder final
   static ElementAccess ForFixedArrayElement(
       ElementsKind kind,
       LoadSensitivity load_sensitivity = LoadSensitivity::kUnsafe);
+
+  // Provides access to stack arguments
+  static ElementAccess ForStackArgument();
 
   // Provides access to FixedDoubleArray elements.
   static ElementAccess ForFixedDoubleArrayElement();

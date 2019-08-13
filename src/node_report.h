@@ -4,11 +4,9 @@
 #include "node_buffer.h"
 #include "uv.h"
 #include "v8.h"
+#include "util.h"
 
-#ifdef _WIN32
-#include <time.h>
-#else
-#include <sys/time.h>
+#ifndef _WIN32
 #include <sys/types.h>
 #include <unistd.h>
 #endif
@@ -28,12 +26,6 @@
 #include <vector>
 
 namespace report {
-
-#ifdef _WIN32
-#define PATHSEP "\\"
-#else  // UNIX, OSX
-#define PATHSEP "/"
-#endif
 
 // Function declarations - functions in src/node_report.cc
 std::string TriggerNodeReport(v8::Isolate* isolate,

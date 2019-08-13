@@ -1,7 +1,9 @@
 #define NODE_EXPERIMENTAL_HTTP 1
 
 #include "node_http_parser_impl.h"
+#include "memory_tracker-inl.h"
 #include "node_metadata.h"
+#include "util-inl.h"
 
 namespace node {
 

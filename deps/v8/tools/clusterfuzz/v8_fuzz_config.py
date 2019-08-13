@@ -8,13 +8,14 @@ import random
 # List of <probability>, <1st config name>, <2nd config name>, <2nd d8>.
 # Probabilities must add up to 100.
 FOOZZIE_EXPERIMENTS = [
-  [5, 'ignition', 'ignition_asm', 'd8'],
-  [5, 'ignition', 'trusted', 'd8'],
-  [5, 'ignition', 'trusted_opt', 'd8'],
+  [10, 'ignition', 'jitless', 'd8'],
   [10, 'ignition', 'slow_path', 'd8'],
   [5, 'ignition', 'slow_path_opt', 'd8'],
-  [25, 'ignition', 'ignition_turbo', 'd8'],
-  [20, 'ignition', 'ignition_turbo_opt', 'd8'],
+  [10, 'ignition', 'ignition_turbo', 'd8'],
+  [10, 'ignition_no_ic', 'ignition_turbo', 'd8'],
+  [10, 'ignition', 'ignition_turbo_no_ic', 'd8'],
+  [10, 'ignition', 'ignition_turbo_opt', 'd8'],
+  [10, 'ignition_no_ic', 'ignition_turbo_opt', 'd8'],
   [5, 'ignition_turbo_opt', 'ignition_turbo_opt', 'clang_x86/d8'],
   [5, 'ignition_turbo', 'ignition_turbo', 'clang_x86/d8'],
   [5, 'ignition', 'ignition', 'clang_x86/d8'],

@@ -40,9 +40,11 @@ function nextdir() {
   return `test${++dirc}`;
 }
 
-// fs.promises should not be enumerable as long as it causes a warning to be
-// emitted.
-assert.strictEqual(Object.keys(fs).includes('promises'), false);
+// fs.promises should be enumerable.
+assert.strictEqual(
+  Object.prototype.propertyIsEnumerable.call(fs, 'promises'),
+  true
+);
 
 {
   access(__filename, 'r')
@@ -81,6 +83,7 @@ async function getHandle(dest) {
     {
       const handle = await getHandle(dest);
       assert.strictEqual(typeof handle, 'object');
+      await handle.close();
     }
 
     // file stats
@@ -104,6 +107,7 @@ async function getHandle(dest) {
 
       await handle.datasync();
       await handle.sync();
+      await handle.close();
     }
 
     // Test fs.read promises when length to read is zero bytes
@@ -117,6 +121,7 @@ async function getHandle(dest) {
       assert.strictEqual(ret.bytesRead, 0);
 
       await unlink(dest);
+      await handle.close();
     }
 
     // Bytes written to file match buffer
@@ -128,6 +133,7 @@ async function getHandle(dest) {
       const ret = await handle.read(Buffer.alloc(bufLen), 0, bufLen, 0);
       assert.strictEqual(ret.bytesRead, bufLen);
       assert.deepStrictEqual(ret.buffer, buf);
+      await handle.close();
     }
 
     // Truncate file to specified length
@@ -141,9 +147,10 @@ async function getHandle(dest) {
       assert.deepStrictEqual(ret.buffer, buf);
       await truncate(dest, 5);
       assert.deepStrictEqual((await readFile(dest)).toString(), 'hello');
+      await handle.close();
     }
 
-    // invalid change of ownership
+    // Invalid change of ownership
     {
       const handle = await getHandle(dest);
 
@@ -179,9 +186,11 @@ async function getHandle(dest) {
           message: 'The value of "gid" is out of range. ' +
                     'It must be >= 0 && < 4294967296. Received -1'
         });
+
+      await handle.close();
     }
 
-    // set modification times
+    // Set modification times
     {
       const handle = await getHandle(dest);
 
@@ -271,7 +280,7 @@ async function getHandle(dest) {
       await unlink(newFile);
     }
 
-    // mkdir when options is number.
+    // `mkdir` when options is number.
     {
       const dir = path.join(tmpDir, nextdir());
       await mkdir(dir, 777);
@@ -279,7 +288,7 @@ async function getHandle(dest) {
       assert(stats.isDirectory());
     }
 
-    // mkdir when options is string.
+    // `mkdir` when options is string.
     {
       const dir = path.join(tmpDir, nextdir());
       await mkdir(dir, '777');
@@ -295,19 +304,37 @@ async function getHandle(dest) {
       assert(stats.isDirectory());
     }
 
-    // mkdirp when path is a file.
+    // `mkdirp` when path is a file.
     {
       const dir = path.join(tmpDir, nextdir(), nextdir());
       await mkdir(path.dirname(dir));
       await writeFile(dir);
-      try {
-        await mkdir(dir, { recursive: true });
-        throw new Error('unreachable');
-      } catch (err) {
-        assert.notStrictEqual(err.message, 'unreachable');
-        assert.strictEqual(err.code, 'EEXIST');
-        assert.strictEqual(err.syscall, 'mkdir');
-      }
+      assert.rejects(
+        mkdir(dir, { recursive: true }),
+        {
+          code: 'EEXIST',
+          message: /EEXIST: .*mkdir/,
+          name: 'Error',
+          syscall: 'mkdir',
+        }
+      );
+    }
+
+    // `mkdirp` when part of the path is a file.
+    {
+      const file = path.join(tmpDir, nextdir(), nextdir());
+      const dir = path.join(file, nextdir(), nextdir());
+      await mkdir(path.dirname(file));
+      await writeFile(file);
+      assert.rejects(
+        mkdir(dir, { recursive: true }),
+        {
+          code: 'ENOTDIR',
+          message: /ENOTDIR: .*mkdir/,
+          name: 'Error',
+          syscall: 'mkdir',
+        }
+      );
     }
 
     // mkdirp ./

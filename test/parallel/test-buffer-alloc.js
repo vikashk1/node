@@ -5,6 +5,12 @@ const vm = require('vm');
 
 const SlowBuffer = require('buffer').SlowBuffer;
 
+// Verify the maximum Uint8Array size. There is no concrete limit by spec. The
+// internal limits should be updated if this fails.
+assert.throws(
+  () => new Uint8Array(2 ** 31),
+  { message: 'Invalid typed array length: 2147483648' }
+);
 
 const b = Buffer.allocUnsafe(1024);
 assert.strictEqual(b.length, 1024);
@@ -59,8 +65,7 @@ assert.throws(() => b.write('test string', 0, 5, 'invalid'),
               /Unknown encoding: invalid/);
 // Unsupported arguments for Buffer.write
 assert.throws(() => b.write('test', 'utf8', 0),
-              /is no longer supported/);
-
+              { code: 'ERR_INVALID_ARG_TYPE' });
 
 // Try to create 0-length buffers. Should not throw.
 Buffer.from('');
@@ -74,27 +79,22 @@ new Buffer('', 'latin1');
 new Buffer('', 'binary');
 Buffer(0);
 
-const outOfBoundsError = {
-  code: 'ERR_BUFFER_OUT_OF_BOUNDS',
-  type: RangeError
-};
-
 const outOfRangeError = {
   code: 'ERR_OUT_OF_RANGE',
   type: RangeError
 };
 
 // Try to write a 0-length string beyond the end of b
-common.expectsError(() => b.write('', 2048), outOfBoundsError);
+common.expectsError(() => b.write('', 2048), outOfRangeError);
 
 // Throw when writing to negative offset
-common.expectsError(() => b.write('a', -1), outOfBoundsError);
+common.expectsError(() => b.write('a', -1), outOfRangeError);
 
 // Throw when writing past bounds from the pool
-common.expectsError(() => b.write('a', 2048), outOfBoundsError);
+common.expectsError(() => b.write('a', 2048), outOfRangeError);
 
 // Throw when writing to negative offset
-common.expectsError(() => b.write('a', -1), outOfBoundsError);
+common.expectsError(() => b.write('a', -1), outOfRangeError);
 
 // Try to copy 0 bytes worth of data into an empty buffer
 b.copy(Buffer.alloc(0), 0, 0, 0);
@@ -110,8 +110,12 @@ b.copy(Buffer.alloc(1), 0, 2048, 2048);
 {
   const writeTest = Buffer.from('abcdes');
   writeTest.write('n', 'ascii');
-  writeTest.write('o', '1', 'ascii');
-  writeTest.write('d', '2', 'ascii');
+  assert.throws(
+    () => writeTest.write('o', '1', 'ascii'),
+    { code: 'ERR_INVALID_ARG_TYPE' }
+  );
+  writeTest.write('o', 1, 'ascii');
+  writeTest.write('d', 2, 'ascii');
   writeTest.write('e', 3, 'ascii');
   writeTest.write('j', 4, 'ascii');
   assert.strictEqual(writeTest.toString(), 'nodejs');
@@ -537,7 +541,7 @@ assert.strictEqual(Buffer.from('A', 'base64').length, 0);
 
 
 {
-  // test an invalid slice end.
+  // Test an invalid slice end.
   const b = Buffer.from([1, 2, 3, 4, 5]);
   const b2 = b.toString('hex', 1, 10000);
   const b3 = b.toString('hex', 1, 5);
@@ -737,7 +741,7 @@ assert.strictEqual(x.inspect(), '<Buffer 81 a3 66 6f 6f a3 62 61 72>');
 }
 
 {
-  // test for buffer overrun
+  // Test for buffer overrun
   const buf = Buffer.from([0, 0, 0, 0, 0]); // length: 5
   const sub = buf.slice(0, 4);         // length: 4
   assert.strictEqual(sub.write('12345', 'latin1'), 4);
@@ -747,7 +751,7 @@ assert.strictEqual(x.inspect(), '<Buffer 81 a3 66 6f 6f a3 62 61 72>');
 }
 
 {
-  // test alloc with fill option
+  // Test alloc with fill option
   const buf = Buffer.alloc(5, '800A', 'hex');
   assert.strictEqual(buf[0], 128);
   assert.strictEqual(buf[1], 10);

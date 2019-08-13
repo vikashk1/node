@@ -30,11 +30,8 @@
   - [I Made a Mistake](#i-made-a-mistake)
   - [Long Term Support](#long-term-support)
     - [What is LTS?](#what-is-lts)
-    - [How does LTS work?](#how-does-lts-work)
-    - [Landing semver-minor commits in LTS](#landing-semver-minor-commits-in-lts)
     - [How are LTS Branches Managed?](#how-are-lts-branches-managed)
     - [How can I help?](#how-can-i-help)
-    - [How is an LTS release cut?](#how-is-an-lts-release-cut)
 * [Who to CC in the issue tracker](#who-to-cc-in-the-issue-tracker)
 
 This document explains how Collaborators manage the Node.js project.
@@ -80,9 +77,8 @@ Please always remove it again as soon as the conditions are not met anymore.
 
 ### Handling own pull requests
 
-When you open a pull request, [start a CI](#testing-and-ci) right away and post
-the link to it in a comment in the pull request. Later, after new code changes
-or rebasing, start a new CI.
+When you open a pull request, [start a CI](#testing-and-ci) right away. Later,
+after new code changes or rebasing, start a new CI.
 
 As soon as the pull request is ready to land, please do so. This allows other
 Collaborators to focus on other pull requests. If your pull request is not ready
@@ -112,8 +108,8 @@ review by @-mention.
 See [Who to CC in the issue tracker](#who-to-cc-in-the-issue-tracker).
 
 If you are the first Collaborator to approve a pull request that has no CI yet,
-please [start one](#testing-and-ci). Post the link to the CI in the PR. Please
-also start a new CI if the PR creator pushed new code since the last CI run.
+please [start one](#testing-and-ci). Please also start a new CI if the PR
+creator pushed new code since the last CI run.
 
 ### Consensus Seeking
 
@@ -659,40 +655,27 @@ branches.
 
 #### How can I help?
 
-When you send your pull request, please include information about whether your
-change is breaking. If you think your patch can be backported, please include
-that information in the PR thread or your PR description. For more information
-on backporting, please see the [backporting guide][].
+When you send your pull request, please state if your change is breaking. Also
+state if you think your patch is a good candidate for backporting. For more
+information on backporting, please see the [backporting guide][].
 
-Several LTS related issue and PR labels have been provided:
+There are several LTS-related labels:
 
-* `lts-watch-v10.x` - tells the LTS WG that the issue/PR needs to be
-  considered for landing in the `v10.x-staging` branch.
-* `lts-watch-v8.x` - tells the LTS WG that the issue/PR needs to be
-  considered for landing in the `v8.x-staging` branch.
-* `lts-watch-v6.x` - tells the LTS WG that the issue/PR needs to be
-  considered for landing in the `v6.x-staging` branch.
-* `land-on-v10.x` - tells the release team that the commit should be landed
-  in a future v10.x release.
-* `land-on-v8.x` - tells the release team that the commit should be landed
-  in a future v8.x release.
-* `land-on-v6.x` - tells the release team that the commit should be landed
-  in a future v6.x release.
+* `lts-watch-` labels are for pull requests to consider for landing in staging
+  branches. For example, `lts-watch-v10.x` would be for a change
+  to consider for the `v10.x-staging` branch.
 
-Any Collaborator can attach these labels to any PR/issue. As commits are
-landed into the staging branches, the `lts-watch-` label will be removed.
-Likewise, as commits are landed in a LTS release, the `land-on-` label will
-be removed.
+* `land-on-` are for pull requests that should land in a future v*.x
+  release. For example, `land-on-v10.x` would be for a change to land in Node.js
+  10.x.
 
-Collaborators are encouraged to help the LTS WG by attaching the appropriate
-`lts-watch-` label to any PR that may impact an LTS release.
+Any Collaborator can attach these labels to any pull request/issue. As commits
+land on the staging branches, the backporter removes the `lts-watch-` label.
+Likewise, as commits land in an LTS release, the releaser removes the `land-on-`
+label.
 
-#### How is an LTS release cut?
-
-When the LTS working group determines that a new LTS release is required,
-selected commits will be picked from the staging branch to be included in the
-release. This process of making a release will be a collaboration between the
-LTS working group and the Release team.
+Attach the appropriate `lts-watch-` label to any PR that may impact an LTS
+release.
 
 ## Who to CC in the issue tracker
 

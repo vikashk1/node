@@ -24,13 +24,12 @@
 
 #if defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS
 
-#include "env-inl.h"
+#include "env.h"
 #include "node.h"
 #include "node_binding.h"
 #include "node_mutex.h"
-#include "node_persistent.h"
 #include "tracing/trace_event.h"
-#include "util-inl.h"
+#include "util.h"
 #include "uv.h"
 #include "v8.h"
 
@@ -86,12 +85,15 @@ void GetSockOrPeerName(const v8::FunctionCallbackInfo<v8::Value>& args) {
   args.GetReturnValue().Set(err);
 }
 
+void PrintStackTrace(v8::Isolate* isolate, v8::Local<v8::StackTrace> stack);
+void PrintCaughtException(v8::Isolate* isolate,
+                          v8::Local<v8::Context> context,
+                          const v8::TryCatch& try_catch);
+
 void WaitForInspectorDisconnect(Environment* env);
-void SignalExit(int signo);
+void ResetStdio();  // Safe to call more than once and from signal handlers.
 #ifdef __POSIX__
-void RegisterSignalHandler(int signal,
-                           void (*handler)(int signal),
-                           bool reset_handler = false);
+void SignalExit(int signal, siginfo_t* info, void* ucontext);
 #endif
 
 std::string GetHumanReadableProcessName();
@@ -213,7 +215,7 @@ class InternalCallbackScope {
   Environment* env_;
   async_context async_context_;
   v8::Local<v8::Object> object_;
-  Environment::AsyncCallbackScope callback_scope_;
+  AsyncCallbackScope callback_scope_;
   bool failed_ = false;
   bool pushed_ids_ = false;
   bool closed_ = false;
@@ -251,27 +253,6 @@ class ThreadPoolWork {
   uv_work_t work_req_;
 };
 
-void ThreadPoolWork::ScheduleWork() {
-  env_->IncreaseWaitingRequestCounter();
-  int status = uv_queue_work(
-      env_->event_loop(),
-      &work_req_,
-      [](uv_work_t* req) {
-        ThreadPoolWork* self = ContainerOf(&ThreadPoolWork::work_req_, req);
-        self->DoThreadPoolWork();
-      },
-      [](uv_work_t* req, int status) {
-        ThreadPoolWork* self = ContainerOf(&ThreadPoolWork::work_req_, req);
-        self->env_->DecreaseWaitingRequestCounter();
-        self->AfterThreadPoolWork(status);
-      });
-  CHECK_EQ(status, 0);
-}
-
-int ThreadPoolWork::CancelWork() {
-  return uv_cancel(reinterpret_cast<uv_req_t*>(&work_req_));
-}
-
 #define TRACING_CATEGORY_NODE "node"
 #define TRACING_CATEGORY_NODE1(one)                                           \
     TRACING_CATEGORY_NODE ","                                                 \
@@ -288,49 +269,73 @@ int ThreadPoolWork::CancelWork() {
 #endif  // __POSIX__ && !defined(__ANDROID__) && !defined(__CloudABI__)
 
 namespace credentials {
-bool SafeGetenv(const char* key, std::string* text);
+bool SafeGetenv(const char* key, std::string* text, Environment* env = nullptr);
 }  // namespace credentials
 
 void DefineZlibConstants(v8::Local<v8::Object> target);
-
-v8::MaybeLocal<v8::Value> RunBootstrapping(Environment* env);
+v8::Isolate* NewIsolate(v8::Isolate::CreateParams* params,
+                        uv_loop_t* event_loop,
+                        MultiIsolatePlatform* platform);
 v8::MaybeLocal<v8::Value> StartExecution(Environment* env,
                                          const char* main_script_id);
 v8::MaybeLocal<v8::Object> GetPerContextExports(v8::Local<v8::Context> context);
+v8::MaybeLocal<v8::Value> ExecuteBootstrapper(
+    Environment* env,
+    const char* id,
+    std::vector<v8::Local<v8::String>>* parameters,
+    std::vector<v8::Local<v8::Value>>* arguments);
+void MarkBootstrapComplete(const v8::FunctionCallbackInfo<v8::Value>& args);
 
+struct InitializationResult {
+  int exit_code = 0;
+  std::vector<std::string> args;
+  std::vector<std::string> exec_args;
+  bool early_return = false;
+};
+InitializationResult InitializeOncePerProcess(int argc, char** argv);
+void TearDownOncePerProcess();
+enum class IsolateSettingCategories { kErrorHandlers, kMisc };
+void SetIsolateUpForNode(v8::Isolate* isolate, IsolateSettingCategories cat);
+void SetIsolateCreateParamsForNode(v8::Isolate::CreateParams* params);
+
+#if HAVE_INSPECTOR
 namespace profiler {
-void StartCoverageCollection(Environment* env);
+void StartProfilers(Environment* env);
+void EndStartedProfilers(Environment* env);
 }
+#endif  // HAVE_INSPECTOR
+
 #ifdef _WIN32
 typedef SYSTEMTIME TIME_TYPE;
 #else  // UNIX, OSX
 typedef struct tm TIME_TYPE;
 #endif
 
+double GetCurrentTimeInMicroseconds();
+int WriteFileSync(const char* path, uv_buf_t buf);
+int WriteFileSync(v8::Isolate* isolate,
+                  const char* path,
+                  v8::Local<v8::String> string);
+
 class DiagnosticFilename {
  public:
   static void LocalTime(TIME_TYPE* tm_struct);
 
-  DiagnosticFilename(Environment* env,
-                     const char* prefix,
-                     const char* ext,
-                     int seq = -1) :
-      filename_(MakeFilename(env->thread_id(), prefix, ext, seq)) {}
+  inline DiagnosticFilename(Environment* env,
+                            const char* prefix,
+                            const char* ext);
 
-  DiagnosticFilename(uint64_t thread_id,
-                     const char* prefix,
-                     const char* ext,
-                     int seq = -1) :
-      filename_(MakeFilename(thread_id, prefix, ext, seq)) {}
+  inline DiagnosticFilename(uint64_t thread_id,
+                            const char* prefix,
+                            const char* ext);
 
-  const char* operator*() const { return filename_.c_str(); }
+  inline const char* operator*() const;
 
  private:
   static std::string MakeFilename(
       uint64_t thread_id,
       const char* prefix,
-      const char* ext,
-      int seq = -1);
+      const char* ext);
 
   std::string filename_;
 };

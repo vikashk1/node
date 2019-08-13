@@ -21,6 +21,7 @@ using v8::Context;
 using v8::DontDelete;
 using v8::DontEnum;
 using v8::External;
+using v8::Function;
 using v8::FunctionCallbackInfo;
 using v8::HandleScope;
 using v8::Integer;
@@ -275,7 +276,7 @@ int StreamBase::WriteString(const FunctionCallbackInfo<Value>& args) {
     // collected before `AfterWrite` is called.
     req_wrap_obj->Set(env->context(),
                       env->handle_string(),
-                      send_handle_obj).FromJust();
+                      send_handle_obj).Check();
   }
 
   StreamWriteResult res = Write(&buf, 1, send_handle, req_wrap_obj);
@@ -314,7 +315,9 @@ void StreamBase::CallJSOnreadMethod(ssize_t nread,
 
   AsyncWrap* wrap = GetAsyncWrap();
   CHECK_NOT_NULL(wrap);
-  wrap->MakeCallback(env->onread_string(), arraysize(argv), argv);
+  Local<Value> onread = wrap->object()->GetInternalField(kOnReadFunctionField);
+  CHECK(onread->IsFunction());
+  wrap->MakeCallback(onread.As<Function>(), arraysize(argv), argv);
 }
 
 
@@ -376,6 +379,10 @@ void StreamBase::AddMethods(Environment* env, Local<FunctionTemplate> t) {
   t->PrototypeTemplate()->Set(FIXED_ONE_BYTE_STRING(env->isolate(),
                                                     "isStreamBase"),
                               True(env->isolate()));
+  t->PrototypeTemplate()->SetAccessor(
+      FIXED_ONE_BYTE_STRING(env->isolate(), "onread"),
+      BaseObject::InternalFieldGet<kOnReadFunctionField>,
+      BaseObject::InternalFieldSet<kOnReadFunctionField, &Value::IsFunction>);
 }
 
 void StreamBase::GetFD(const FunctionCallbackInfo<Value>& args) {

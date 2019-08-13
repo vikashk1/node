@@ -3,7 +3,7 @@
 #include "node_internals.h"
 #include "node_options.h"
 #include "node_report.h"
-#include "util.h"
+#include "util-inl.h"
 
 #include "handle_wrap.h"
 #include "node_buffer.h"
@@ -155,7 +155,8 @@ static void SetReportOnUncaughtException(
 
 static void Initialize(Local<Object> exports,
                        Local<Value> unused,
-                       Local<Context> context) {
+                       Local<Context> context,
+                       void* priv) {
   Environment* env = Environment::GetCurrent(context);
 
   env->SetMethod(exports, "writeReport", WriteReport);

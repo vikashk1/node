@@ -32,7 +32,7 @@ fs.unlink('/tmp/hello', (err) => {
 ```
 
 Exceptions that occur using synchronous operations are thrown immediately and
-may be handled using `try`/`catch`, or may be allowed to bubble up.
+may be handled using `try…catch`, or may be allowed to bubble up.
 
 ```js
 const fs = require('fs');
@@ -73,9 +73,9 @@ fs.rename('/tmp/hello', '/tmp/world', (err) => {
 });
 ```
 
-In busy processes, the programmer is _strongly encouraged_ to use the
-asynchronous versions of these calls. The synchronous versions will block
-the entire process until they complete — halting all connections.
+In busy processes, use the asynchronous versions of these calls. The synchronous
+versions will block the entire process until they complete, halting all
+connections.
 
 While it is not recommended, most fs functions allow the callback argument to
 be omitted, in which case a default callback is used that rethrows errors. To
@@ -512,7 +512,8 @@ A `fs.Stats` object provides information about a file.
 Objects returned from [`fs.stat()`][], [`fs.lstat()`][] and [`fs.fstat()`][] and
 their synchronous counterparts are of this type.
 If `bigint` in the `options` passed to those methods is true, the numeric values
-will be `bigint` instead of `number`.
+will be `bigint` instead of `number`, and the object will contain additional
+nanosecond-precision properties suffixed with `Ns`.
 
 ```console
 Stats {
@@ -539,7 +540,7 @@ Stats {
 `bigint` version:
 
 ```console
-Stats {
+BigIntStats {
   dev: 2114n,
   ino: 48064969n,
   mode: 33188n,
@@ -554,6 +555,10 @@ Stats {
   mtimeMs: 1318289051000n,
   ctimeMs: 1318289051000n,
   birthtimeMs: 1318289051000n,
+  atimeNs: 1318289051000000000n,
+  mtimeNs: 1318289051000000000n,
+  ctimeNs: 1318289051000000000n,
+  birthtimeNs: 1318289051000000000n,
   atime: Mon, 10 Oct 2011 23:24:11 GMT,
   mtime: Mon, 10 Oct 2011 23:24:11 GMT,
   ctime: Mon, 10 Oct 2011 23:24:11 GMT,
@@ -726,6 +731,54 @@ added: v8.1.0
 The timestamp indicating the creation time of this file expressed in
 milliseconds since the POSIX Epoch.
 
+### stats.atimeNs
+<!-- YAML
+added: REPLACEME
+-->
+
+* {bigint}
+
+Only present when `bigint: true` is passed into the method that generates
+the object.
+The timestamp indicating the last time this file was accessed expressed in
+nanoseconds since the POSIX Epoch.
+
+### stats.mtimeNs
+<!-- YAML
+added: REPLACEME
+-->
+
+* {bigint}
+
+Only present when `bigint: true` is passed into the method that generates
+the object.
+The timestamp indicating the last time this file was modified expressed in
+nanoseconds since the POSIX Epoch.
+
+### stats.ctimeNs
+<!-- YAML
+added: REPLACEME
+-->
+
+* {bigint}
+
+Only present when `bigint: true` is passed into the method that generates
+the object.
+The timestamp indicating the last time the file status was changed expressed
+in nanoseconds since the POSIX Epoch.
+
+### stats.birthtimeNs
+<!-- YAML
+added: REPLACEME
+-->
+
+* {bigint}
+
+Only present when `bigint: true` is passed into the method that generates
+the object.
+The timestamp indicating the creation time of this file expressed in
+nanoseconds since the POSIX Epoch.
+
 ### stats.atime
 <!-- YAML
 added: v0.11.13
@@ -765,8 +818,17 @@ The timestamp indicating the creation time of this file.
 ### Stat Time Values
 
 The `atimeMs`, `mtimeMs`, `ctimeMs`, `birthtimeMs` properties are
-[numbers][MDN-Number] that hold the corresponding times in milliseconds. Their
-precision is platform specific. `atime`, `mtime`, `ctime`, and `birthtime` are
+numeric values that hold the corresponding times in milliseconds. Their
+precision is platform specific. When `bigint: true` is passed into the
+method that generates the object, the properties will be [bigints][],
+otherwise they will be [numbers][MDN-Number].
+
+The `atimeNs`, `mtimeNs`, `ctimeNs`, `birthtimeNs` properties are
+[bigints][] that hold the corresponding times in nanoseconds. They are
+only present when `bigint: true` is passed into the method that generates
+the object. Their precision is platform specific.
+
+`atime`, `mtime`, `ctime`, and `birthtime` are
 [`Date`][MDN-Date] object alternate representations of the various times. The
 `Date` and number values are not connected. Assigning a new number value, or
 mutating the `Date` value, will not be reflected in the corresponding alternate
@@ -785,7 +847,7 @@ The times in the stat object have the following semantics:
 * `birthtime` "Birth Time" - Time of file creation. Set once when the
   file is created. On filesystems where birthtime is not available,
   this field may instead hold either the `ctime` or
-  `1970-01-01T00:00Z` (ie, unix epoch timestamp `0`). This value may be greater
+  `1970-01-01T00:00Z` (ie, Unix epoch timestamp `0`). This value may be greater
   than `atime` or `mtime` in this case. On Darwin and other FreeBSD variants,
   also set if the `atime` is explicitly set to an earlier value than the current
   `birthtime` using the utimes(2) system call.
@@ -1180,6 +1242,13 @@ Asynchronously changes the permissions of a file. No arguments other than a
 possible exception are given to the completion callback.
 
 See also: chmod(2).
+
+```js
+fs.chmod('my_file.txt', 0o775, (err) => {
+  if (err) throw err;
+  console.log('The permissions for file "my_file.txt" have been changed!');
+});
+```
 
 ### File modes
 
@@ -1701,6 +1770,11 @@ this API: [`fs.exists()`][].
 parameter to `fs.exists()` accepts parameters that are inconsistent with other
 Node.js callbacks. `fs.existsSync()` does not use a callback.
 
+```js
+if (fs.existsSync('/etc/passwd')) {
+  console.log('The file exists.');
+}
+```
 
 ## fs.fchmod(fd, mode, callback)
 <!-- YAML
@@ -2206,7 +2280,9 @@ are given to the completion callback.
 
 The optional `options` argument can be an integer specifying mode (permission
 and sticky bits), or an object with a `mode` property and a `recursive`
-property indicating whether parent folders should be created.
+property indicating whether parent folders should be created. Calling
+`fs.mkdir()` when `path` is a directory that exists results in an error only
+when `recursive` is false.
 
 ```js
 // Creates /tmp/a/apple, regardless of whether `/tmp` and /tmp/a exist.
@@ -2277,7 +2353,10 @@ changes:
 Creates a unique temporary directory.
 
 Generates six random characters to be appended behind a required
-`prefix` to create a unique temporary directory.
+`prefix` to create a unique temporary directory. Due to platform
+inconsistencies, avoid trailing `X` characters in `prefix`. Some platforms,
+notably the BSDs, can return more than six random characters, and replace
+trailing `X` characters in `prefix` with random characters.
 
 The created folder path is passed as a string to the callback's second
 parameter.
@@ -2893,7 +2972,8 @@ changes:
 
 Asynchronously rename file at `oldPath` to the pathname provided
 as `newPath`. In the case that `newPath` already exists, it will
-be overwritten. No arguments other than a possible exception are
+be overwritten. If there is a directory at `newPath`, an error will
+be raised instead. No arguments other than a possible exception are
 given to the completion callback.
 
 See also: rename(2).
@@ -3009,6 +3089,76 @@ error raised if the file is not available.
 To check if a file exists without manipulating it afterwards, [`fs.access()`]
 is recommended.
 
+For example, given the following folder structure:
+
+```fundamental
+- txtDir
+-- file.txt
+- app.js
+```
+
+The next program will check for the stats of the given paths:
+
+```js
+const fs = require('fs');
+
+const pathsToCheck = ['./txtDir', './txtDir/file.txt'];
+
+for (let i = 0; i < pathsToCheck.length; i++) {
+  fs.stat(pathsToCheck[i], function(err, stats) {
+    console.log(stats.isDirectory());
+    console.log(stats);
+  });
+}
+```
+
+The resulting output will resemble:
+
+```console
+true
+Stats {
+  dev: 16777220,
+  mode: 16877,
+  nlink: 3,
+  uid: 501,
+  gid: 20,
+  rdev: 0,
+  blksize: 4096,
+  ino: 14214262,
+  size: 96,
+  blocks: 0,
+  atimeMs: 1561174653071.963,
+  mtimeMs: 1561174614583.3518,
+  ctimeMs: 1561174626623.5366,
+  birthtimeMs: 1561174126937.2893,
+  atime: 2019-06-22T03:37:33.072Z,
+  mtime: 2019-06-22T03:36:54.583Z,
+  ctime: 2019-06-22T03:37:06.624Z,
+  birthtime: 2019-06-22T03:28:46.937Z
+}
+false
+Stats {
+  dev: 16777220,
+  mode: 33188,
+  nlink: 1,
+  uid: 501,
+  gid: 20,
+  rdev: 0,
+  blksize: 4096,
+  ino: 14214074,
+  size: 8,
+  blocks: 8,
+  atimeMs: 1561174616618.8555,
+  mtimeMs: 1561174614584,
+  ctimeMs: 1561174614583.8145,
+  birthtimeMs: 1561174007710.7478,
+  atime: 2019-06-22T03:36:56.619Z,
+  mtime: 2019-06-22T03:36:54.584Z,
+  ctime: 2019-06-22T03:36:54.584Z,
+  birthtime: 2019-06-22T03:26:47.711Z
+}
+```
+
 ## fs.statSync(path[, options])
 <!-- YAML
 added: v0.1.21
@@ -3040,7 +3190,7 @@ changes:
     description: The `target` and `path` parameters can be WHATWG `URL` objects
                  using `file:` protocol. Support is currently still
                  *experimental*.
-  - version: REPLACEME
+  - version: v12.0.0
     pr-url: https://github.com/nodejs/node/pull/23724
     description: If the `type` argument is left undefined, Node will autodetect
                  `target` type and automatically select `dir` or `file`
@@ -3078,7 +3228,7 @@ changes:
     description: The `target` and `path` parameters can be WHATWG `URL` objects
                  using `file:` protocol. Support is currently still
                  *experimental*.
-  - version: REPLACEME
+  - version: v12.0.0
     pr-url: https://github.com/nodejs/node/pull/23724
     description: If the `type` argument is left undefined, Node will autodetect
                  `target` type and automatically select `dir` or `file`
@@ -3589,8 +3739,12 @@ changes:
 * `callback` {Function}
   * `err` {Error}
 
-Asynchronously writes data to a file, replacing the file if it already exists.
-`data` can be a string or a buffer.
+When `file` is a filename, asynchronously writes data to the file, replacing the
+file if it already exists.  `data` can be a string or a buffer.
+
+When `file` is a file descriptor, the behavior is similar to calling
+`fs.write()` directly (which is recommended). See the notes below on using
+a file descriptor.
 
 The `encoding` option is ignored if `data` is a buffer.
 
@@ -3612,15 +3766,30 @@ It is unsafe to use `fs.writeFile()` multiple times on the same file without
 waiting for the callback. For this scenario, [`fs.createWriteStream()`][] is
 recommended.
 
-### File Descriptors
-1. Any specified file descriptor has to support writing.
-2. If a file descriptor is specified as the `file`, it will not be closed
-automatically.
-3. The writing will begin at the current position. For example, if the string
-`'Hello'` is written to the file descriptor, and if `', World'` is written with
-`fs.writeFile()` to the same file descriptor, the contents of the file would
-become `'Hello, World'`, instead of just `', World'`.
+### Using `fs.writeFile()` with File Descriptors
 
+When `file` is a file descriptor, the behavior is almost identical to directly
+calling `fs.write()` like:
+```javascript
+fs.write(fd, Buffer.from(data, options.encoding), callback);
+```
+
+The difference from directly calling `fs.write()` is that under some unusual
+conditions, `fs.write()` may write only part of the buffer and will need to be
+retried to write the remaining data, whereas `fs.writeFile()` will retry until
+the data is entirely written (or an error occurs).
+
+The implications of this are a common source of confusion. In
+the file descriptor case, the file is not replaced! The data is not necessarily
+written to the beginning of the file, and the file's original data may remain
+before and/or after the newly written data.
+
+For example, if `fs.writeFile()` is called twice in a row, first to write the
+string `'Hello'`, then to write the string `', World'`, the file would contain
+`'Hello, World'`, and might contain some of the file's original data (depending
+on the size of the original file, and the position of the file descriptor).  If
+a file name had been used instead of a descriptor, the file would be guaranteed
+to contain only `', World'`.
 
 ## fs.writeFileSync(file, data[, options])
 <!-- YAML
@@ -3696,8 +3865,6 @@ this API: [`fs.write(fd, string...)`][].
 
 ## fs Promises API
 
-> Stability: 1 - Experimental
-
 The `fs.promises` API provides an alternative set of asynchronous file system
 methods that return `Promise` objects rather than using callbacks. The
 API is accessible via `require('fs').promises`.
@@ -3709,9 +3876,14 @@ added: v10.0.0
 
 A `FileHandle` object is a wrapper for a numeric file descriptor.
 Instances of `FileHandle` are distinct from numeric file descriptors
-in that, if the `FileHandle` is not explicitly closed using the
-`filehandle.close()` method, they will automatically close the file descriptor
+in that they provide an object oriented API for working with files.
+
+If a `FileHandle` is not closed using the
+`filehandle.close()` method, it might automatically close the file descriptor
 and will emit a process warning, thereby helping to prevent memory leaks.
+Please do not rely on this behavior in your code because it is unreliable and
+your file may not be closed. Instead, always explicitly close `FileHandle`s.
+Node.js may change this behavior in the future.
 
 Instances of the `FileHandle` object are created internally by the
 `fsPromises.open()` method.
@@ -3990,7 +4162,7 @@ at the current position. See pwrite(2).
 
 It is unsafe to use `filehandle.write()` multiple times on the same file
 without waiting for the `Promise` to be resolved (or rejected). For this
-scenario, [`fs.createWriteStream()`][] is strongly recommended.
+scenario, use [`fs.createWriteStream()`][].
 
 On Linux, positional writes do not work when the file is opened in append mode.
 The kernel ignores the position argument and always appends the data to
@@ -4021,7 +4193,7 @@ will be written at the current position. See pwrite(2).
 
 It is unsafe to use `filehandle.write()` multiple times on the same file
 without waiting for the `Promise` to be resolved (or rejected). For this
-scenario, [`fs.createWriteStream()`][] is strongly recommended.
+scenario, use [`fs.createWriteStream()`][].
 
 On Linux, positional writes do not work when the file is opened in append mode.
 The kernel ignores the position argument and always appends the data to
@@ -4266,7 +4438,9 @@ arguments upon success.
 
 The optional `options` argument can be an integer specifying mode (permission
 and sticky bits), or an object with a `mode` property and a `recursive`
-property indicating whether parent folders should be created.
+property indicating whether parent folders should be created. Calling
+`fsPromises.mkdir()` when `path` is a directory that exists results in a
+rejection only when `recursive` is false.
 
 ### fsPromises.mkdtemp(prefix[, options])
 <!-- YAML
@@ -4280,7 +4454,10 @@ added: v10.0.0
 
 Creates a unique temporary directory and resolves the `Promise` with the created
 folder path. A unique directory name is generated by appending six random
-characters to the end of the provided `prefix`.
+characters to the end of the provided `prefix`. Due to platform
+inconsistencies, avoid trailing `X` characters in `prefix`. Some platforms,
+notably the BSDs, can return more than six random characters, and replace
+trailing `X` characters in `prefix` with random characters.
 
 The optional `options` argument can be a string specifying an encoding, or an
 object with an `encoding` property specifying the character encoding to use.
@@ -4941,6 +5118,7 @@ the file contents.
 [`net.Socket`]: net.html#net_class_net_socket
 [`stat()`]: fs.html#fs_fs_stat_path_options_callback
 [`util.promisify()`]: util.html#util_util_promisify_original
+[bigints]: https://tc39.github.io/proposal-bigint
 [Caveats]: #fs_caveats
 [Common System Errors]: errors.html#errors_common_system_errors
 [FS Constants]: #fs_fs_constants_1

@@ -1,19 +1,15 @@
-#include "env.h"
 #include "node.h"
 #include "node_context_data.h"
 #include "node_errors.h"
 #include "node_internals.h"
-#include "node_native_module.h"
+#include "node_native_module_env.h"
 #include "node_platform.h"
-#include "node_process.h"
 #include "node_v8_platform-inl.h"
 #include "uv.h"
 
-#ifdef NODE_ENABLE_VTUNE_PROFILING
-#include "../deps/v8/src/third_party/vtune/v8-vtune.h"
-#endif
-
 namespace node {
+using errors::TryCatchScope;
+using v8::Array;
 using v8::Context;
 using v8::EscapableHandleScope;
 using v8::Function;
@@ -21,8 +17,8 @@ using v8::HandleScope;
 using v8::Isolate;
 using v8::Local;
 using v8::MaybeLocal;
-using v8::Message;
 using v8::MicrotasksPolicy;
+using v8::Null;
 using v8::Object;
 using v8::ObjectTemplate;
 using v8::Private;
@@ -45,30 +41,39 @@ static bool ShouldAbortOnUncaughtException(Isolate* isolate) {
          !env->inside_should_not_abort_on_uncaught_scope();
 }
 
-static void OnMessage(Local<Message> message, Local<Value> error) {
-  Isolate* isolate = message->GetIsolate();
-  switch (message->ErrorLevel()) {
-    case Isolate::MessageErrorLevel::kMessageWarning: {
-      Environment* env = Environment::GetCurrent(isolate);
-      if (!env) {
-        break;
-      }
-      Utf8Value filename(isolate, message->GetScriptOrigin().ResourceName());
-      // (filename):(line) (message)
-      std::stringstream warning;
-      warning << *filename;
-      warning << ":";
-      warning << message->GetLineNumber(env->context()).FromMaybe(-1);
-      warning << " ";
-      v8::String::Utf8Value msg(isolate, message->Get());
-      warning << *msg;
-      USE(ProcessEmitWarningGeneric(env, warning.str().c_str(), "V8"));
-      break;
-    }
-    case Isolate::MessageErrorLevel::kMessageError:
-      FatalException(isolate, error, message);
-      break;
+static MaybeLocal<Value> PrepareStackTraceCallback(Local<Context> context,
+                                      Local<Value> exception,
+                                      Local<Array> trace) {
+  Environment* env = Environment::GetCurrent(context);
+  if (env == nullptr) {
+    MaybeLocal<String> s = exception->ToString(context);
+    return s.IsEmpty() ?
+      MaybeLocal<Value>() :
+      MaybeLocal<Value>(s.ToLocalChecked());
   }
+  Local<Function> prepare = env->prepare_stack_trace_callback();
+  if (prepare.IsEmpty()) {
+    MaybeLocal<String> s = exception->ToString(context);
+    return s.IsEmpty() ?
+      MaybeLocal<Value>() :
+      MaybeLocal<Value>(s.ToLocalChecked());
+  }
+  Local<Value> args[] = {
+      context->Global(),
+      exception,
+      trace,
+  };
+  // This TryCatch + Rethrow is required by V8 due to details around exception
+  // handling there. For C++ callbacks, V8 expects a scheduled exception (which
+  // is what ReThrow gives us). Just returning the empty MaybeLocal would leave
+  // us with a pending exception.
+  TryCatchScope try_catch(env);
+  MaybeLocal<Value> result = prepare->Call(
+      context, Undefined(env->isolate()), arraysize(args), args);
+  if (try_catch.HasCaught() && !try_catch.HasTerminated()) {
+    try_catch.ReThrow();
+  }
+  return result;
 }
 
 void* NodeArrayBufferAllocator::Allocate(size_t size) {
@@ -138,7 +143,11 @@ void DebuggingArrayBufferAllocator::UnregisterPointerInternal(void* data,
   if (data == nullptr) return;
   auto it = allocations_.find(data);
   CHECK_NE(it, allocations_.end());
-  CHECK_EQ(it->second, size);
+  if (size > 0) {
+    // We allow allocations with size 1 for 0-length buffers to avoid having
+    // to deal with nullptr values.
+    CHECK_EQ(it->second, size);
+  }
   allocations_.erase(it);
 }
 
@@ -164,58 +173,78 @@ void FreeArrayBufferAllocator(ArrayBufferAllocator* allocator) {
   delete allocator;
 }
 
-void SetIsolateCreateParams(Isolate::CreateParams* params,
-                            ArrayBufferAllocator* allocator) {
-  if (allocator != nullptr)
-    params->array_buffer_allocator = allocator;
-
-  double total_memory = uv_get_total_memory();
+void SetIsolateCreateParamsForNode(Isolate::CreateParams* params) {
+  const uint64_t constrained_memory = uv_get_constrained_memory();
+  const uint64_t total_memory = constrained_memory > 0 ?
+      std::min(uv_get_total_memory(), constrained_memory) :
+      uv_get_total_memory();
   if (total_memory > 0) {
     // V8 defaults to 700MB or 1.4GB on 32 and 64 bit platforms respectively.
     // This default is based on browser use-cases. Tell V8 to configure the
     // heap based on the actual physical memory.
     params->constraints.ConfigureDefaults(total_memory, 0);
   }
+}
 
-#ifdef NODE_ENABLE_VTUNE_PROFILING
-  params->code_event_handler = vTune::GetVtuneCodeEventHandler();
-#endif
+void SetIsolateUpForNode(v8::Isolate* isolate, IsolateSettingCategories cat) {
+  switch (cat) {
+    case IsolateSettingCategories::kErrorHandlers:
+      isolate->AddMessageListenerWithErrorLevel(
+          errors::PerIsolateMessageListener,
+          Isolate::MessageErrorLevel::kMessageError |
+              Isolate::MessageErrorLevel::kMessageWarning);
+      isolate->SetAbortOnUncaughtExceptionCallback(
+          ShouldAbortOnUncaughtException);
+      isolate->SetFatalErrorHandler(OnFatalError);
+      isolate->SetPrepareStackTraceCallback(PrepareStackTraceCallback);
+      break;
+    case IsolateSettingCategories::kMisc:
+      isolate->SetMicrotasksPolicy(MicrotasksPolicy::kExplicit);
+      isolate->SetAllowWasmCodeGenerationCallback(
+          AllowWasmCodeGenerationCallback);
+      isolate->SetPromiseRejectCallback(task_queue::PromiseRejectCallback);
+      v8::CpuProfiler::UseDetailedSourcePositionsForProfiling(isolate);
+      break;
+    default:
+      UNREACHABLE();
+      break;
+  }
 }
 
 void SetIsolateUpForNode(v8::Isolate* isolate) {
-  isolate->AddMessageListenerWithErrorLevel(
-      OnMessage,
-      Isolate::MessageErrorLevel::kMessageError |
-          Isolate::MessageErrorLevel::kMessageWarning);
-  isolate->SetAbortOnUncaughtExceptionCallback(ShouldAbortOnUncaughtException);
-  isolate->SetMicrotasksPolicy(MicrotasksPolicy::kExplicit);
-  isolate->SetFatalErrorHandler(OnFatalError);
-  isolate->SetAllowWasmCodeGenerationCallback(AllowWasmCodeGenerationCallback);
-  isolate->SetPromiseRejectCallback(task_queue::PromiseRejectCallback);
-  v8::CpuProfiler::UseDetailedSourcePositionsForProfiling(isolate);
+  SetIsolateUpForNode(isolate, IsolateSettingCategories::kErrorHandlers);
+  SetIsolateUpForNode(isolate, IsolateSettingCategories::kMisc);
 }
 
 Isolate* NewIsolate(ArrayBufferAllocator* allocator, uv_loop_t* event_loop) {
   return NewIsolate(allocator, event_loop, GetMainThreadMultiIsolatePlatform());
 }
 
-Isolate* NewIsolate(ArrayBufferAllocator* allocator,
+// TODO(joyeecheung): we may want to expose this, but then we need to be
+// careful about what we override in the params.
+Isolate* NewIsolate(Isolate::CreateParams* params,
                     uv_loop_t* event_loop,
                     MultiIsolatePlatform* platform) {
-  Isolate::CreateParams params;
-  SetIsolateCreateParams(&params, allocator);
-
   Isolate* isolate = Isolate::Allocate();
   if (isolate == nullptr) return nullptr;
 
   // Register the isolate on the platform before the isolate gets initialized,
   // so that the isolate can access the platform during initialization.
   platform->RegisterIsolate(isolate, event_loop);
-  Isolate::Initialize(isolate, params);
 
+  SetIsolateCreateParamsForNode(params);
+  Isolate::Initialize(isolate, *params);
   SetIsolateUpForNode(isolate);
 
   return isolate;
+}
+
+Isolate* NewIsolate(ArrayBufferAllocator* allocator,
+                    uv_loop_t* event_loop,
+                    MultiIsolatePlatform* platform) {
+  Isolate::CreateParams params;
+  if (allocator != nullptr) params.array_buffer_allocator = allocator;
+  return NewIsolate(&params, event_loop, platform);
 }
 
 IsolateData* CreateIsolateData(Isolate* isolate,
@@ -246,11 +275,29 @@ Environment* CreateEnvironment(IsolateData* isolate_data,
   Environment* env = new Environment(
       isolate_data,
       context,
+      args,
+      exec_args,
       static_cast<Environment::Flags>(Environment::kIsMainThread |
                                       Environment::kOwnsProcessState |
                                       Environment::kOwnsInspector));
   env->InitializeLibuv(per_process::v8_is_profiling);
-  env->ProcessCliArgs(args, exec_args);
+  if (env->RunBootstrapping().IsEmpty()) {
+    return nullptr;
+  }
+
+  std::vector<Local<String>> parameters = {
+      env->require_string(),
+      FIXED_ONE_BYTE_STRING(env->isolate(), "markBootstrapComplete")};
+  std::vector<Local<Value>> arguments = {
+      env->native_module_require(),
+      env->NewFunctionTemplate(MarkBootstrapComplete)
+          ->GetFunction(env->context())
+          .ToLocalChecked()};
+  if (ExecuteBootstrapper(
+          env, "internal/bootstrap/environment", &parameters, &arguments)
+          .IsEmpty()) {
+    return nullptr;
+  }
   return env;
 }
 
@@ -315,26 +362,31 @@ Local<Context> NewContext(Isolate* isolate,
     // Run per-context JS files.
     Context::Scope context_scope(context);
     Local<Object> exports;
-    if (!GetPerContextExports(context).ToLocal(&exports))
-      return Local<Context>();
 
+    Local<String> primordials_string =
+        FIXED_ONE_BYTE_STRING(isolate, "primordials");
     Local<String> global_string = FIXED_ONE_BYTE_STRING(isolate, "global");
     Local<String> exports_string = FIXED_ONE_BYTE_STRING(isolate, "exports");
 
-    static const char* context_files[] = {
-      "internal/per_context/setup",
-      "internal/per_context/domexception",
-      nullptr
-    };
+    // Create primordials first and make it available to per-context scripts.
+    Local<Object> primordials = Object::New(isolate);
+    if (!primordials->SetPrototype(context, Null(isolate)).FromJust() ||
+        !GetPerContextExports(context).ToLocal(&exports) ||
+        !exports->Set(context, primordials_string, primordials).FromJust()) {
+      return Local<Context>();
+    }
+
+    static const char* context_files[] = {"internal/per_context/primordials",
+                                          "internal/per_context/setup",
+                                          "internal/per_context/domexception",
+                                          nullptr};
 
     for (const char** module = context_files; *module != nullptr; module++) {
       std::vector<Local<String>> parameters = {
-        global_string,
-        exports_string
-      };
-      Local<Value> arguments[] = {context->Global(), exports};
+          global_string, exports_string, primordials_string};
+      Local<Value> arguments[] = {context->Global(), exports, primordials};
       MaybeLocal<Function> maybe_fn =
-          per_process::native_module_loader.LookupAndCompile(
+          native_module::NativeModuleEnv::LookupAndCompile(
               context, *module, &parameters, nullptr);
       if (maybe_fn.IsEmpty()) {
         return Local<Context>();

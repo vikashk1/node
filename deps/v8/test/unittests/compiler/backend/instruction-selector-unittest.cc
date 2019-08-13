@@ -4,12 +4,12 @@
 
 #include "test/unittests/compiler/backend/instruction-selector-unittest.h"
 
-#include "src/code-factory.h"
+#include "src/codegen/code-factory.h"
 #include "src/compiler/compiler-source-position-table.h"
 #include "src/compiler/graph.h"
 #include "src/compiler/schedule.h"
-#include "src/flags.h"
-#include "src/objects-inl.h"
+#include "src/flags/flags.h"
+#include "src/objects/objects-inl.h"
 #include "test/unittests/compiler/compiler-test-utils.h"
 
 namespace v8 {
@@ -243,8 +243,8 @@ TARGET_TEST_F(InstructionSelectorTest, FinishRegion) {
 // -----------------------------------------------------------------------------
 // Phi.
 
-typedef InstructionSelectorTestWithParam<MachineType>
-    InstructionSelectorPhiTest;
+using InstructionSelectorPhiTest =
+    InstructionSelectorTestWithParam<MachineType>;
 
 TARGET_TEST_P(InstructionSelectorPhiTest, Doubleness) {
   const MachineType type = GetParam();
@@ -284,7 +284,7 @@ TARGET_TEST_P(InstructionSelectorPhiTest, Referenceness) {
   EXPECT_EQ(s.IsReference(phi), s.IsReference(param1));
 }
 
-INSTANTIATE_TEST_CASE_P(
+INSTANTIATE_TEST_SUITE_P(
     InstructionSelectorTest, InstructionSelectorPhiTest,
     ::testing::Values(MachineType::Float64(), MachineType::Int8(),
                       MachineType::Uint8(), MachineType::Int16(),

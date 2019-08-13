@@ -1,9 +1,12 @@
 #ifndef SRC_JS_NATIVE_API_V8_H_
 #define SRC_JS_NATIVE_API_V8_H_
 
-#include <string.h>
+// This file needs to be compatible with C compilers.
+#include <string.h>  // NOLINT(modernize-deprecated-headers)
 #include "js_native_api_types.h"
 #include "js_native_api_v8_internals.h"
+
+static napi_status napi_clear_last_error(napi_env env);
 
 struct napi_env__ {
   explicit napi_env__(v8::Local<v8::Context> context)
@@ -11,7 +14,13 @@ struct napi_env__ {
         context_persistent(isolate, context) {
     CHECK_EQ(isolate, context->GetIsolate());
   }
-  virtual ~napi_env__() {}
+  virtual ~napi_env__() {
+    if (instance_data.finalize_cb != nullptr) {
+      CallIntoModuleThrow([&](napi_env env) {
+        instance_data.finalize_cb(env, instance_data.data, instance_data.hint);
+      });
+    }
+  }
   v8::Isolate* const isolate;  // Shortcut for context()->GetIsolate()
   v8impl::Persistent<v8::Context> context_persistent;
 
@@ -24,11 +33,37 @@ struct napi_env__ {
 
   virtual bool can_call_into_js() const { return true; }
 
+  template <typename T, typename U>
+  void CallIntoModule(T&& call, U&& handle_exception) {
+    int open_handle_scopes_before = open_handle_scopes;
+    int open_callback_scopes_before = open_callback_scopes;
+    napi_clear_last_error(this);
+    call(this);
+    CHECK_EQ(open_handle_scopes, open_handle_scopes_before);
+    CHECK_EQ(open_callback_scopes, open_callback_scopes_before);
+    if (!last_exception.IsEmpty()) {
+      handle_exception(this, last_exception.Get(this->isolate));
+      last_exception.Reset();
+    }
+  }
+
+  template <typename T>
+  void CallIntoModuleThrow(T&& call) {
+    CallIntoModule(call, [&](napi_env env, v8::Local<v8::Value> value) {
+      env->isolate->ThrowException(value);
+    });
+  }
+
   v8impl::Persistent<v8::Value> last_exception;
   napi_extended_error_info last_error;
   int open_handle_scopes = 0;
   int open_callback_scopes = 0;
   int refs = 1;
+  struct {
+    void* data = nullptr;
+    void* hint = nullptr;
+    napi_finalize finalize_cb = nullptr;
+  } instance_data;
 };
 
 static inline napi_status napi_clear_last_error(napi_env env) {
@@ -113,27 +148,6 @@ napi_status napi_set_last_error(napi_env env, napi_status error_code,
     }                                                              \
   } while (0)
 
-template <typename T, typename U>
-void NapiCallIntoModule(napi_env env, T&& call, U&& handle_exception) {
-  int open_handle_scopes = env->open_handle_scopes;
-  int open_callback_scopes = env->open_callback_scopes;
-  napi_clear_last_error(env);
-  call();
-  CHECK_EQ(env->open_handle_scopes, open_handle_scopes);
-  CHECK_EQ(env->open_callback_scopes, open_callback_scopes);
-  if (!env->last_exception.IsEmpty()) {
-    handle_exception(env->last_exception.Get(env->isolate));
-    env->last_exception.Reset();
-  }
-}
-
-template <typename T>
-void NapiCallIntoModuleThrow(napi_env env, T&& call) {
-  NapiCallIntoModule(env, call, [&](v8::Local<v8::Value> value) {
-    env->isolate->ThrowException(value);
-  });
-}
-
 namespace v8impl {
 
 //=== Conversion between V8 Handles and napi_value ========================
@@ -149,7 +163,7 @@ inline napi_value JsValueFromV8LocalValue(v8::Local<v8::Value> local) {
 
 inline v8::Local<v8::Value> V8LocalValueFromJsValue(napi_value v) {
   v8::Local<v8::Value> local;
-  memcpy(&local, &v, sizeof(v));
+  memcpy(static_cast<void*>(&local), &v, sizeof(v));
   return local;
 }
 
@@ -166,8 +180,7 @@ class Finalizer {
       _finalize_hint(finalize_hint) {
   }
 
-  ~Finalizer() {
-  }
+  ~Finalizer() = default;
 
  public:
   static Finalizer* New(napi_env env,

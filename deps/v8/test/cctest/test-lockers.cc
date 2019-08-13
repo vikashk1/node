@@ -29,15 +29,15 @@
 
 #include <memory>
 
-#include "src/v8.h"
+#include "src/init/v8.h"
 
 #include "src/base/platform/platform.h"
-#include "src/compilation-cache.h"
-#include "src/execution.h"
-#include "src/isolate.h"
-#include "src/objects-inl.h"
-#include "src/unicode-inl.h"
-#include "src/utils.h"
+#include "src/codegen/compilation-cache.h"
+#include "src/execution/execution.h"
+#include "src/execution/isolate.h"
+#include "src/objects/objects-inl.h"
+#include "src/strings/unicode-inl.h"
+#include "src/utils/utils.h"
 #include "test/cctest/cctest.h"
 
 namespace {
@@ -157,6 +157,7 @@ TEST(LazyDeoptimizationMultithread) {
         "function f() { g(); return obj.x; }"
         "function g() { if (b) { unlock_for_deoptimization(); } }"
         "%NeverOptimizeFunction(g);"
+        "%PrepareFunctionForOptimization(f);"
         "f(); f(); %OptimizeFunctionOnNextCall(f);"
         "f();");
 
@@ -212,6 +213,7 @@ TEST(LazyDeoptimizationMultithreadWithNatives) {
         "function g() { "
         "  unlock_for_deoptimization(); }"
         "%NeverOptimizeFunction(g);"
+        "%PrepareFunctionForOptimization(f);"
         "f(); f(); %OptimizeFunctionOnNextCall(f);");
 
     // Trigger the unlocking.
@@ -262,6 +264,7 @@ TEST(EagerDeoptimizationMultithread) {
     // Optimizes a function f, which will be deoptimized by another thread.
     CompileRun(
         "function f(obj) { unlock_for_deoptimization(); return obj.x; }"
+        "%PrepareFunctionForOptimization(f);"
         "f({x: 1}); f({x: 1});"
         "%OptimizeFunctionOnNextCall(f);"
         "f({x: 1});");
@@ -938,32 +941,17 @@ class IsolateGenesisThread : public JoinableThread {
 TEST(ExtensionsRegistration) {
 #if V8_TARGET_ARCH_ARM || V8_TARGET_ARCH_MIPS
   const int kNThreads = 10;
-#elif V8_TARGET_ARCH_X64 && V8_TARGET_ARCH_32_BIT
-  const int kNThreads = 4;
 #elif V8_TARGET_ARCH_S390 && V8_TARGET_ARCH_32_BIT
   const int kNThreads = 10;
 #else
   const int kNThreads = 40;
 #endif
-  v8::RegisterExtension(new v8::Extension("test0",
-                                          kSimpleExtensionSource));
-  v8::RegisterExtension(new v8::Extension("test1",
-                                          kSimpleExtensionSource));
-  v8::RegisterExtension(new v8::Extension("test2",
-                                          kSimpleExtensionSource));
-  v8::RegisterExtension(new v8::Extension("test3",
-                                          kSimpleExtensionSource));
-  v8::RegisterExtension(new v8::Extension("test4",
-                                          kSimpleExtensionSource));
-  v8::RegisterExtension(new v8::Extension("test5",
-                                          kSimpleExtensionSource));
-  v8::RegisterExtension(new v8::Extension("test6",
-                                          kSimpleExtensionSource));
-  v8::RegisterExtension(new v8::Extension("test7",
-                                          kSimpleExtensionSource));
-  const char* extension_names[] = { "test0", "test1",
-                                    "test2", "test3", "test4",
-                                    "test5", "test6", "test7" };
+  const char* extension_names[] = {"test0", "test1", "test2", "test3",
+                                   "test4", "test5", "test6", "test7"};
+  for (const char* name : extension_names) {
+    v8::RegisterExtension(
+        v8::base::make_unique<v8::Extension>(name, kSimpleExtensionSource));
+  }
   std::vector<JoinableThread*> threads;
   threads.reserve(kNThreads);
   for (int i = 0; i < kNThreads; i++) {

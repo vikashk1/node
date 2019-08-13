@@ -1,5 +1,6 @@
 {
   'variables': {
+    'configuring_node%': 0,
     'asan%': 0,
     'werror': '',                     # Turn off -Werror in V8 build.
     'visibility%': 'hidden',          # V8's visibility setting
@@ -27,6 +28,7 @@
     'clang%': 0,
 
     'openssl_fips%': '',
+    'openssl_no_asm%': 0,
 
     # Some STL containers (e.g. std::vector) do not preserve ABI compatibility
     # between debug and non-debug mode.
@@ -37,12 +39,12 @@
 
     # Reset this number to 0 on major V8 upgrades.
     # Increment by one for each non-official patch applied to deps/v8.
-    'v8_embedder_string': '-node.7',
+    'v8_embedder_string': '-node.14',
 
     ##### V8 defaults for Node.js #####
 
     # Old time default, now explicitly stated.
-    'v8_use_snapshot': 'true',
+    'v8_use_snapshot': 1,
 
     # Turn on SipHash for hash seed generation, addresses HashWick
     'v8_use_siphash': 'true',
@@ -58,67 +60,66 @@
     # Enable disassembler for `--print-code` v8 options
     'v8_enable_disassembler': 1,
 
-    # Don't bake anything extra into the snapshot.
-    'v8_use_external_startup_data': 0,
-
     # https://github.com/nodejs/node/pull/22920/files#r222779926
     'v8_enable_handle_zapping': 0,
 
     # Disable V8 untrusted code mitigations.
     # See https://github.com/v8/v8/wiki/Untrusted-code-mitigations
-    'v8_untrusted_code_mitigations': 'false',
-
-    # Still WIP in V8 7.1
-    'v8_enable_pointer_compression': 'false',
-
-    # New in V8 7.1
-    'v8_enable_embedded_builtins': 'true',
+    'v8_untrusted_code_mitigations': 0,
 
     # This is more of a V8 dev setting
     # https://github.com/nodejs/node/pull/22920/files#r222779926
     'v8_enable_fast_mksnapshot': 0,
 
+    'v8_win64_unwinding_info': 1,
+
+    # TODO(refack): make v8-perfetto happen
+    'v8_use_perfetto': 0,
+
     ##### end V8 defaults #####
 
     'conditions': [
-      ['target_arch=="arm64"', {
-        # Disabled pending https://github.com/nodejs/node/issues/23913.
-        'openssl_no_asm%': 1,
-      }, {
-        'openssl_no_asm%': 0,
-      }],
-      ['GENERATOR=="ninja"', {
-        'obj_dir': '<(PRODUCT_DIR)/obj',
-        'conditions': [
-          [ 'build_v8_with_gn=="true"', {
-            'v8_base': '<(PRODUCT_DIR)/obj/deps/v8/gypfiles/v8_monolith.gen/gn/obj/libv8_monolith.a',
-          }, {
-            'v8_base': '<(PRODUCT_DIR)/obj/deps/v8/gypfiles/libv8_base.a',
-          }],
-        ]
-       }, {
-        'obj_dir%': '<(PRODUCT_DIR)/obj.target',
-        'v8_base': '<(PRODUCT_DIR)/obj.target/deps/v8/gypfiles/libv8_base.a',
-      }],
       ['OS == "win"', {
         'os_posix': 0,
-        'v8_postmortem_support%': 'false',
-        'obj_dir': '<(PRODUCT_DIR)/obj',
-        'v8_base': '<(PRODUCT_DIR)/lib/v8_libbase.lib',
+        'v8_postmortem_support%': 0,
       }, {
         'os_posix': 1,
-        'v8_postmortem_support%': 'true',
+        'v8_postmortem_support%': 1,
       }],
-      ['OS == "mac"', {
-        'obj_dir%': '<(PRODUCT_DIR)/obj.target',
-        'v8_base': '<(PRODUCT_DIR)/libv8_base.a',
-      }],
-      ['build_v8_with_gn == "true"', {
+      ['v8_use_snapshot==1', {
         'conditions': [
           ['GENERATOR == "ninja"', {
-            'v8_base': '<(PRODUCT_DIR)/obj/deps/v8/gypfiles/v8_monolith.gen/gn/obj/libv8_monolith.a',
-          }, {
-            'v8_base': '<(PRODUCT_DIR)/obj.target/v8_monolith/geni/gn/obj/libv8_monolith.a',
+            'obj_dir': '<(PRODUCT_DIR)/obj',
+            'v8_base': '<(PRODUCT_DIR)/obj/tools/v8_gypfiles/libv8_snapshot.a',
+           }, {
+            'obj_dir%': '<(PRODUCT_DIR)/obj.target',
+            'v8_base': '<(PRODUCT_DIR)/obj.target/tools/v8_gypfiles/libv8_snapshot.a',
+          }],
+          ['OS == "win"', {
+            'obj_dir': '<(PRODUCT_DIR)/obj',
+            'v8_base': '<(PRODUCT_DIR)/lib/libv8_snapshot.a',
+          }],
+          ['OS == "mac"', {
+            'obj_dir%': '<(PRODUCT_DIR)/obj.target',
+            'v8_base': '<(PRODUCT_DIR)/libv8_snapshot.a',
+          }],
+        ],
+      }, {
+        'conditions': [
+          ['GENERATOR == "ninja"', {
+            'obj_dir': '<(PRODUCT_DIR)/obj',
+            'v8_base': '<(PRODUCT_DIR)/obj/tools/v8_gypfiles/libv8_nosnapshot.a',
+           }, {
+            'obj_dir%': '<(PRODUCT_DIR)/obj.target',
+            'v8_base': '<(PRODUCT_DIR)/obj.target/tools/v8_gypfiles/libv8_nosnapshot.a',
+          }],
+          ['OS == "win"', {
+            'obj_dir': '<(PRODUCT_DIR)/obj',
+            'v8_base': '<(PRODUCT_DIR)/lib/libv8_nosnapshot.a',
+          }],
+          ['OS == "mac"', {
+            'obj_dir%': '<(PRODUCT_DIR)/obj.target',
+            'v8_base': '<(PRODUCT_DIR)/libv8_nosnapshot.a',
           }],
         ],
       }],
@@ -248,39 +249,29 @@
     'msvs_settings': {
       'VCCLCompilerTool': {
         'BufferSecurityCheck': 'true',
-        'DebugInformationFormat': 1, # /Z7 embed info in .obj files
-        'ExceptionHandling': 0, # /EHsc
+        'DebugInformationFormat': 1,          # /Z7 embed info in .obj files
+        'ExceptionHandling': 0,               # /EHsc
         'MultiProcessorCompilation': 'true',
-        'StringPooling': 'true', # pool string literals
+        'StringPooling': 'true',              # pool string literals
         'SuppressStartupBanner': 'true',
         'WarnAsError': 'false',
-        'WarningLevel': 3,       # /W3
+        'WarningLevel': 3,                    # /W3
       },
       'VCLinkerTool': {
+        'target_conditions': [
+          ['_type=="executable"', {
+            'SubSystem': 1,                   # /SUBSYSTEM:CONSOLE
+          }],
+        ],
         'conditions': [
           ['target_arch=="ia32"', {
-            'TargetMachine' : 1, # /MACHINE:X86
-            'target_conditions': [
-              ['_type=="executable"', {
-                'AdditionalOptions': [ '/SubSystem:Console,"5.01"' ],
-              }],
-            ],
+            'TargetMachine' : 1,              # /MACHINE:X86
           }],
           ['target_arch=="x64"', {
-            'TargetMachine' : 17, # /MACHINE:AMD64
-            'target_conditions': [
-              ['_type=="executable"', {
-                'AdditionalOptions': [ '/SubSystem:Console,"5.02"' ],
-              }],
-            ],
+            'TargetMachine' : 17,             # /MACHINE:X64
           }],
           ['target_arch=="arm64"', {
-            'TargetMachine' : 0, # /MACHINE:ARM64 is inferred from the input files.
-            'target_conditions': [
-              ['_type=="executable"', {
-                'AdditionalOptions': [ '/SubSystem:Console' ],
-              }],
-            ],
+            'TargetMachine' : 0,              # NotSet. MACHINE:ARM64 is inferred from the input files.
           }],
         ],
         'GenerateDebugInformation': 'true',
@@ -304,6 +295,12 @@
     'msvs_cygwin_shell': 0, # prevent actions from trying to use cygwin
 
     'conditions': [
+      [ 'configuring_node', {
+        'msvs_configuration_attributes': {
+          'OutputDirectory': '<(DEPTH)/out/$(Configuration)/',
+          'IntermediateDirectory': '$(OutDir)obj/$(ProjectName)/'
+        },
+      }],
       [ 'target_arch=="x64"', {
         'msvs_configuration_platform': 'x64',
       }],
@@ -391,10 +388,6 @@
             'cflags': [ '-m64', '-mminimal-toc' ],
             'ldflags': [ '-m64' ],
           }],
-          [ 'target_arch=="s390"', {
-            'cflags': [ '-m31', '-march=z196' ],
-            'ldflags': [ '-m31', '-march=z196' ],
-          }],
           [ 'target_arch=="s390x"', {
             'cflags': [ '-m64', '-march=z196' ],
             'ldflags': [ '-m64', '-march=z196' ],
@@ -453,7 +446,7 @@
           'GCC_ENABLE_CPP_RTTI': 'NO',              # -fno-rtti
           'GCC_ENABLE_PASCAL_STRINGS': 'NO',        # No -mpascal-strings
           'PREBINDING': 'NO',                       # No -Wl,-prebind
-          'MACOSX_DEPLOYMENT_TARGET': '10.7',       # -mmacosx-version-min=10.7
+          'MACOSX_DEPLOYMENT_TARGET': '10.10',      # -mmacosx-version-min=10.10
           'USE_HEADERMAP': 'NO',
           'OTHER_CFLAGS': [
             '-fno-strict-aliasing',
@@ -497,6 +490,18 @@
       ['OS=="freebsd"', {
         'ldflags': [
           '-Wl,--export-dynamic',
+        ],
+      }],
+      # if node is built as an executable,
+      #      the openssl mechanism for keeping itself "dload"-ed to ensure proper
+      #      atexit cleanup does not apply
+      ['node_shared_openssl!="true" and node_shared!="true"', {
+        'defines': [
+          # `OPENSSL_NO_PINSHARED` prevents openssl from dload
+          #      current node executable,
+          #      see https://github.com/nodejs/node/pull/21848
+          #      or https://github.com/nodejs/node/issues/27925
+          'OPENSSL_NO_PINSHARED'
         ],
       }],
       ['node_shared_openssl!="true"', {

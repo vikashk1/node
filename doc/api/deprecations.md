@@ -3,9 +3,11 @@
 <!--introduced_in=v7.7.0-->
 <!-- type=misc -->
 
-Node.js may deprecate APIs when either: (a) use of the API is considered to be
-unsafe, (b) an improved alternative API is available, or (c) breaking changes to
-the API are expected in a future major release.
+Node.js may deprecate APIs for any of the following reasons:
+
+* Use of the API is unsafe.
+* An improved alternative API is available.
+* Breaking changes to the API are expected in a future major release.
 
 Node.js utilizes three kinds of Deprecations:
 
@@ -24,7 +26,7 @@ are explicitly labeled as such in the
 
 A Runtime deprecation will, by default, generate a process warning that will
 be printed to `stderr` the first time the deprecated API is used. When the
-`--throw-deprecation` command-line flag is used, a Runtime deprecation will
+[`--throw-deprecation`][] command-line flag is used, a Runtime deprecation will
 cause an error to be thrown.
 
 An End-of-Life deprecation is used when functionality is or will soon be removed
@@ -134,10 +136,10 @@ changes:
 Type: Runtime (supports [`--pending-deprecation`][])
 
 The `Buffer()` function and `new Buffer()` constructor are deprecated due to
-API usability issues that can potentially lead to accidental security issues.
+API usability issues that can lead to accidental security issues.
 
-As an alternative, use of the following methods of constructing `Buffer` objects
-is strongly recommended:
+As an alternative, use one of the following methods of constructing `Buffer`
+objects:
 
 * [`Buffer.alloc(size[, fill[, encoding]])`][alloc] - Create a `Buffer` with
   *initialized* memory.
@@ -160,7 +162,7 @@ outside `node_modules` in order to better target developers, rather than users.
 ### DEP0006: child\_process options.customFds
 <!-- YAML
 changes:
-  - version: REPLACEME
+  - version: v12.0.0
     pr-url: https://github.com/nodejs/node/pull/25279
     description: End-of-Life.
   - version:
@@ -337,7 +339,7 @@ changes:
 Type: End-of-Life
 
 Calling an asynchronous function without a callback throws a `TypeError`
-in Node.js 10.0.0 onwards. (See <https://github.com/nodejs/node/pull/12562>.)
+in Node.js 10.0.0 onwards. See <https://github.com/nodejs/node/pull/12562>.
 
 <a id="DEP0014"></a>
 ### DEP0014: fs.read legacy String interface
@@ -442,6 +444,9 @@ code.
 ### DEP0019: require('.') resolved outside directory
 <!-- YAML
 changes:
+  - version: v12.0.0
+    pr-url: https://github.com/nodejs/node/pull/26973
+    description: Removed functionality.
   - version:
     - v4.8.6
     - v6.12.0
@@ -452,11 +457,10 @@ changes:
     description: Runtime deprecation.
 -->
 
-Type: Runtime
+Type: End-of-Life
 
-In certain cases, `require('.')` may resolve outside the package directory.
-This behavior is deprecated and will be removed in a future major Node.js
-release.
+In certain cases, `require('.')` could resolve outside the package directory.
+This behavior has been removed.
 
 <a id="DEP0020"></a>
 ### DEP0020: Server.connections
@@ -481,6 +485,9 @@ The [`Server.connections`][] property is deprecated. Please use the
 ### DEP0021: Server.listenFD
 <!-- YAML
 changes:
+  - version: v12.0.0
+    pr-url: https://github.com/nodejs/node/pull/27127
+    description: End-of-Life.
   - version:
     - v4.8.6
     - v6.12.0
@@ -491,9 +498,9 @@ changes:
     description: Runtime deprecation.
 -->
 
-Type: Runtime
+Type: End-of-Life
 
-The `Server.listenFD()` method is deprecated. Please use
+The `Server.listenFD()` method was deprecated and removed. Please use
 [`Server.listen({fd: <number>})`][] instead.
 
 <a id="DEP0022"></a>
@@ -513,7 +520,7 @@ The `os.tmpDir()` API is deprecated. Please use [`os.tmpdir()`][] instead.
 ### DEP0023: os.getNetworkInterfaces()
 <!-- YAML
 changes:
-  - version: REPLACEME
+  - version: v12.0.0
     pr-url: https://github.com/nodejs/node/pull/25280
     description: End-of-Life.
   - version:
@@ -569,7 +576,7 @@ The `sys` module is deprecated. Please use the [`util`][] module instead.
 ### DEP0026: util.print()
 <!-- YAML
 changes:
-  - version: REPLACEME
+  - version: v12.0.0
     pr-url: https://github.com/nodejs/node/pull/25377
     description: End-of-Life.
   - version:
@@ -590,7 +597,7 @@ Type: End-of-Life
 ### DEP0027: util.puts()
 <!-- YAML
 changes:
-  - version: REPLACEME
+  - version: v12.0.0
     pr-url: https://github.com/nodejs/node/pull/25377
     description: End-of-Life.
   - version:
@@ -611,7 +618,7 @@ Type: End-of-Life
 ### DEP0028: util.debug()
 <!-- YAML
 changes:
-  - version: REPLACEME
+  - version: v12.0.0
     pr-url: https://github.com/nodejs/node/pull/25377
     description: End-of-Life.
   - version:
@@ -632,7 +639,7 @@ Type: End-of-Life
 ### DEP0029: util.error()
 <!-- YAML
 changes:
-  - version: REPLACEME
+  - version: v12.0.0
     pr-url: https://github.com/nodejs/node/pull/25377
     description: End-of-Life.
   - version:
@@ -791,7 +798,9 @@ changes:
 
 Type: Deprecation revoked
 
-The [`fs.lchown(path, uid, gid, callback)`][] API is deprecated.
+The [`fs.lchown(path, uid, gid, callback)`][] API was deprecated. The
+deprecation was revoked because the requisite supporting APIs were added in
+libuv.
 
 <a id="DEP0038"></a>
 ### DEP0038: fs.lchownSync(path, uid, gid)
@@ -811,7 +820,8 @@ changes:
 
 Type: Deprecation revoked
 
-The [`fs.lchownSync(path, uid, gid)`][] API is deprecated.
+The [`fs.lchownSync(path, uid, gid)`][] API was deprecated. The deprecation was
+revoked because the requisite supporting APIs were added in libuv.
 
 <a id="DEP0039"></a>
 ### DEP0039: require.extensions
@@ -1279,7 +1289,7 @@ changes:
   - version: v8.0.0
     pr-url: https://github.com/nodejs/node/pull/10970
     description: Runtime deprecation.
-  - version: REPLACEME
+  - version: v12.0.0
     pr-url: https://github.com/nodejs/node/pull/25828
     description: End-of-Life.
 -->
@@ -1359,10 +1369,10 @@ The `NODE_REPL_MODE` environment variable is used to set the underlying
 removed. Please use `sloppy` instead.
 
 <a id="DEP0066"></a>
-### DEP0066: outgoingMessage.\_headers, outgoingMessage.\_headerNames
+### DEP0066: OutgoingMessage.prototype.\_headers, OutgoingMessage.prototype.\_headerNames
 <!-- YAML
 changes:
-  - version: REPLACEME
+  - version: v12.0.0
     pr-url: https://github.com/nodejs/node/pull/24167
     description: Runtime deprecation.
   - version: v8.0.0
@@ -1372,15 +1382,18 @@ changes:
 
 Type: Runtime
 
-The `http` module `outgoingMessage._headers` and `outgoingMessage._headerNames`
-properties are deprecated. Use one of the public methods
-(e.g. `outgoingMessage.getHeader()`, `outgoingMessage.getHeaders()`,
-`outgoingMessage.getHeaderNames()`, `outgoingMessage.hasHeader()`,
-`outgoingMessage.removeHeader()`, `outgoingMessage.setHeader()`) for working
-with outgoing headers.
+The `http` module `OutgoingMessage.prototype._headers` and
+`OutgoingMessage.prototype._headerNames` properties are deprecated. Use one of
+the public methods (e.g. `OutgoingMessage.prototype.getHeader()`,
+`OutgoingMessage.prototype.getHeaders()`,
+`OutgoingMessage.prototype.getHeaderNames()`,
+`OutgoingMessage.prototype.hasHeader()`,
+`OutgoingMessage.prototype.removeHeader()`,
+`OutgoingMessage.prototype.setHeader()`) for working with outgoing headers.
 
-The `outgoingMessage._headers` and `outgoingMessage._headerNames` properties
-were never documented as officially supported properties.
+The `OutgoingMessage.prototype._headers` and
+`OutgoingMessage.prototype._headerNames` properties were never documented as
+officially supported properties.
 
 <a id="DEP0067"></a>
 ### DEP0067: OutgoingMessage.prototype.\_renderHeaders
@@ -1688,7 +1701,7 @@ the client and is now unsupported. Use the `ciphers` parameter instead.
 ### DEP0084: requiring bundled internal dependencies
 <!-- YAML
 changes:
-  - version: REPLACEME
+  - version: v12.0.0
     pr-url: https://github.com/nodejs/node/pull/25138
     description: This functionality has been removed.
   - version: v10.0.0
@@ -1741,8 +1754,8 @@ changes:
 Type: End-of-Life
 
 The AsyncHooks Sensitive API was never documented and had various minor issues.
-(See <https://github.com/nodejs/node/issues/15572>.) Use the `AsyncResource`
-API instead.
+Use the `AsyncResource` API instead. See
+<https://github.com/nodejs/node/issues/15572>.
 
 <a id="DEP0086"></a>
 ### DEP0086: Remove runInAsyncIdScope
@@ -1761,13 +1774,15 @@ changes:
 Type: End-of-Life
 
 `runInAsyncIdScope` doesn't emit the `'before'` or `'after'` event and can thus
-cause a lot of issues. See <https://github.com/nodejs/node/issues/14328> for
-more details.
+cause a lot of issues. See <https://github.com/nodejs/node/issues/14328>.
 
 <a id="DEP0089"></a>
 ### DEP0089: require('assert')
 <!-- YAML
 changes:
+  - version: v12.8.0
+    pr-url: https://github.com/nodejs/node/pull/28892
+    description: Deprecation revoked.
   - version:
       - v9.9.0
       - v10.0.0
@@ -1775,11 +1790,11 @@ changes:
     description: Documentation-only deprecation.
 -->
 
-Type: Documentation-only
+Type: Deprecation revoked
 
-Importing assert directly is not recommended as the exposed functions will use
-loose equality checks. Use `require('assert').strict` instead. The API is the
-same as the legacy assert but it will always use strict equality checks.
+Importing assert directly was not recommended as the exposed functions use
+loose equality checks. The deprecation was revoked because use of the `assert`
+module is not discouraged, and the deprecation caused end user confusion.
 
 <a id="DEP0090"></a>
 ### DEP0090: Invalid GCM authentication tag lengths
@@ -1796,10 +1811,10 @@ changes:
 Type: End-of-Life
 
 Node.js used to support all GCM authentication tag lengths which are accepted by
-OpenSSL when calling [`decipher.setAuthTag()`][]. Beginning with node v11.0.0,
-only authentication tag lengths of 128, 120, 112, 104, 96, 64, and 32 bits are
-allowed. Authentication tags whose length is not included in this list are
-considered invalid in compliance with [NIST SP 800-38D][].
+OpenSSL when calling [`decipher.setAuthTag()`][]. Beginning with Node.js
+v11.0.0, only authentication tag lengths of 128, 120, 112, 104, 96, 64, and 32
+bits are allowed. Authentication tags of other lengths are invalid per
+[NIST SP 800-38D][].
 
 <a id="DEP0091"></a>
 ### DEP0091: crypto.DEFAULT_ENCODING
@@ -1905,7 +1920,7 @@ should start using the `async_context` variant of `MakeCallback` or
 ### DEP0098: AsyncHooks Embedder AsyncResource.emitBefore and AsyncResource.emitAfter APIs
 <!-- YAML
 changes:
-  - version: REPLACEME
+  - version: v12.0.0
     pr-url: https://github.com/nodejs/node/pull/26530
     description: End-of-Life
   - version:
@@ -1924,7 +1939,7 @@ to unrecoverable errors.
 
 Use [`asyncResource.runInAsyncScope()`][] API instead which provides a much
 safer, and more convenient, alternative. See
-<https://github.com/nodejs/node/pull/18513> for more details.
+<https://github.com/nodejs/node/pull/18513>.
 
 <a id="DEP0099"></a>
 ### DEP0099: async context-unaware node::MakeCallback C++ APIs
@@ -2168,7 +2183,7 @@ accessed outside of Node.js core: `Socket.prototype._handle`,
 ### DEP0113: Cipher.setAuthTag(), Decipher.getAuthTag()
 <!-- YAML
 changes:
-  - version: REPLACEME
+  - version: v12.0.0
     pr-url: https://github.com/nodejs/node/pull/26249
     description: End-of-Life.
   - version: v11.0.0
@@ -2185,7 +2200,7 @@ were never documented and would throw when called.
 ### DEP0114: crypto._toBuf()
 <!-- YAML
 changes:
-  - version: REPLACEME
+  - version: v12.0.0
     pr-url: https://github.com/nodejs/node/pull/25338
     description: End-of-Life.
   - version: v11.0.0
@@ -2237,18 +2252,21 @@ use the [WHATWG URL API][] instead.
 ### DEP0117: Native crypto handles
 <!-- YAML
 changes:
+  - version: v12.0.0
+    pr-url: https://github.com/nodejs/node/pull/27011
+    description: End-of-Life.
   - version: v11.0.0
     pr-url: https://github.com/nodejs/node/pull/22747
     description: Runtime deprecation.
 -->
 
-Type: Runtime
+Type: End-of-Life
 
 Previous versions of Node.js exposed handles to internal native objects through
 the `_handle` property of the `Cipher`, `Decipher`, `DiffieHellman`,
 `DiffieHellmanGroup`, `ECDH`, `Hash`, `Hmac`, `Sign`, and `Verify` classes.
-Using the `_handle` property to access the native object is deprecated because
-improper use of the native object can lead to crashing the application.
+The `_handle` property has been removed because improper use of the native
+object can lead to crashing the application.
 
 <a id="DEP0118"></a>
 ### DEP0118: dns.lookup() support for a falsy hostname
@@ -2284,7 +2302,7 @@ Type: Documentation-only (supports [`--pending-deprecation`][])
 ### DEP0120: Windows Performance Counter Support
 <!-- YAML
 changes:
-  - version: REPLACEME
+  - version: v12.0.0
     pr-url: https://github.com/nodejs/node/pull/24862
     description: End-of-Life.
   - version: v11.0.0
@@ -2304,10 +2322,12 @@ undocumented `COUNTER_NET_SERVER_CONNECTION()`,
 ### DEP0121: net._setSimultaneousAccepts()
 <!-- YAML
 changes:
-  - version: REPLACEME
+  - version: v12.0.0
     pr-url: https://github.com/nodejs/node/pull/23760
     description: Runtime deprecation.
 -->
+
+Type: Runtime
 
 The undocumented `net._setSimultaneousAccepts()` function was originally
 intended for debugging and performance tuning when using the `child_process`
@@ -2319,7 +2339,7 @@ https://github.com/nodejs/node/issues/18391
 ### DEP0122: tls Server.prototype.setOptions()
 <!-- YAML
 changes:
-  - version: REPLACEME
+  - version: v12.0.0
     pr-url: https://github.com/nodejs/node/pull/23820
     description: Runtime deprecation.
 -->
@@ -2332,7 +2352,7 @@ Please use `Server.prototype.setSecureContext()` instead.
 ### DEP0123: setting the TLS ServerName to an IP address
 <!-- YAML
 changes:
-  - version: REPLACEME
+  - version: v12.0.0
     pr-url: https://github.com/nodejs/node/pull/23329
     description: Runtime deprecation.
 -->
@@ -2346,7 +2366,7 @@ Setting the TLS ServerName to an IP address is not permitted by
 ### DEP0124: using REPLServer.rli
 <!-- YAML
 changes:
-  - version: REPLACEME
+  - version: v12.0.0
     pr-url: https://github.com/nodejs/node/pull/26260
     description: Runtime deprecation.
 -->
@@ -2359,7 +2379,7 @@ This property is a reference to the instance itself.
 ### DEP0125: require('\_stream\_wrap')
 <!-- YAML
 changes:
-  - version: REPLACEME
+  - version: v12.0.0
     pr-url: https://github.com/nodejs/node/pull/26245
     description: Runtime deprecation.
 -->
@@ -2372,7 +2392,7 @@ The `_stream_wrap` module is deprecated.
 ### DEP0126: timers.active()
 <!-- YAML
 changes:
-  - version: REPLACEME
+  - version: v11.14.0
     pr-url: https://github.com/nodejs/node/pull/26760
     description: Runtime deprecation.
 -->
@@ -2388,7 +2408,7 @@ with no performance impact since Node.js 10.
 ### DEP0127: timers._unrefActive()
 <!-- YAML
 changes:
-  - version: REPLACEME
+  - version: v11.14.0
     pr-url: https://github.com/nodejs/node/pull/26760
     description: Runtime deprecation.
 -->
@@ -2400,7 +2420,89 @@ Please use the publicly documented [`timeout.refresh()`][] instead.
 If unreferencing the timeout is necessary, [`timeout.unref()`][] can be used
 with no performance impact since Node.js 10.
 
+<a id="DEP0128"></a>
+### DEP0128: modules with an invalid `main` entry and an `index.js` file
+<!-- YAML
+changes:
+  - version: v12.0.0
+    pr-url: https://github.com/nodejs/node/pull/26823
+    description: Documentation-only.
+-->
+
+Type: Documentation-only (supports [`--pending-deprecation`][])
+
+Modules that have an invalid `main` entry (e.g., `./does-not-exist.js`) and
+also have an `index.js` file in the top level directory will resolve the
+`index.js` file. That is deprecated and is going to throw an error in future
+Node.js versions.
+
+<a id="DEP0129"></a>
+### DEP0129: ChildProcess._channel
+<!-- YAML
+changes:
+  - version: REPLACEME
+    pr-url: https://github.com/nodejs/node/pull/27949
+    description: Runtime deprecation.
+  - version: v11.14.0
+    pr-url: https://github.com/nodejs/node/pull/26982
+    description: Documentation-only.
+-->
+
+Type: Runtime
+
+The `_channel` property of child process objects returned by `spawn()` and
+similar functions is not intended for public use. Use `ChildProcess.channel`
+instead.
+
+<a id="DEP0130"></a>
+### DEP0130: Module.createRequireFromPath()
+<!-- YAML
+changes:
+  - version: REPLACEME
+    pr-url: https://github.com/nodejs/node/pull/27951
+    description: Runtime deprecation.
+  - version: v12.2.0
+    pr-url: https://github.com/nodejs/node/pull/27405
+    description: Documentation-only.
+-->
+
+Type: Runtime
+
+Module.createRequireFromPath() is deprecated. Please use
+[`module.createRequire()`][] instead.
+
+<a id="DEP0131"></a>
+### DEP0131: Legacy HTTP parser
+<!-- YAML
+changes:
+  - version: v12.3.0
+    pr-url: https://github.com/nodejs/node/pull/27498
+    description: Documentation-only.
+-->
+
+Type: Documentation-only
+
+The legacy HTTP parser, used by default in versions of Node.js prior to 12.0.0,
+is deprecated. This deprecation applies to users of the
+[`--http-parser=legacy`][] command-line flag.
+
+<a id="DEP0132"></a>
+### DEP0132: worker.terminate() with callback
+<!-- YAML
+changes:
+  - version: v12.5.0
+    pr-url: https://github.com/nodejs/node/pull/28021
+    description: Runtime deprecation.
+-->
+
+Type: Runtime
+
+Passing a callback to [`worker.terminate()`][] is deprecated. Use the returned
+`Promise` instead, or a listener to the worker’s `'exit'` event.
+
+[`--http-parser=legacy`]: cli.html#cli_http_parser_library
 [`--pending-deprecation`]: cli.html#cli_pending_deprecation
+[`--throw-deprecation`]: cli.html#cli_throw_deprecation
 [`Buffer.allocUnsafeSlow(size)`]: buffer.html#buffer_class_method_buffer_allocunsafeslow_size
 [`Buffer.from(array)`]: buffer.html#buffer_class_method_buffer_from_array
 [`Buffer.from(buffer)`]: buffer.html#buffer_class_method_buffer_from_buffer
@@ -2447,6 +2549,7 @@ with no performance impact since Node.js 10.
 [`http.request()`]: http.html#http_http_request_options_callback
 [`https.get()`]: https.html#https_https_get_options_callback
 [`https.request()`]: https.html#https_https_request_options_callback
+[`module.createRequire()`]: modules.html#modules_module_createrequire_filename
 [`os.networkInterfaces()`]: os.html#os_os_networkinterfaces
 [`os.tmpdir()`]: os.html#os_os_tmpdir
 [`process.env`]: process.html#process_process_env
@@ -2490,6 +2593,7 @@ with no performance impact since Node.js 10.
 [`util.types`]: util.html#util_util_types
 [`util`]: util.html
 [`worker.exitedAfterDisconnect`]: cluster.html#cluster_worker_exitedafterdisconnect
+[`worker.terminate()`]: worker_threads.html#worker_threads_worker_terminate
 [`zlib.bytesWritten`]: zlib.html#zlib_zlib_byteswritten
 [Legacy URL API]: url.html#url_legacy_url_api
 [NIST SP 800-38D]: https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38d.pdf

@@ -4,10 +4,10 @@
 
 #include <bitset>
 
-#include "src/assembler-inl.h"
-#include "src/macro-assembler-inl.h"
-#include "src/simulator.h"
-#include "src/utils.h"
+#include "src/codegen/assembler-inl.h"
+#include "src/codegen/macro-assembler-inl.h"
+#include "src/execution/simulator.h"
+#include "src/utils/utils.h"
 #include "src/wasm/jump-table-assembler.h"
 #include "test/cctest/cctest.h"
 #include "test/common/assembler-tester.h"
@@ -24,10 +24,6 @@ namespace wasm {
 
 #define __ masm.
 
-// TODO(v8:7424,v8:8018): Extend this test to all architectures.
-#if V8_TARGET_ARCH_X64 || V8_TARGET_ARCH_IA32 || V8_TARGET_ARCH_ARM || \
-    V8_TARGET_ARCH_ARM64
-
 namespace {
 
 static volatile int global_stop_bit = 0;
@@ -36,7 +32,7 @@ constexpr int kJumpTableSlotCount = 128;
 constexpr uint32_t kJumpTableSize =
     JumpTableAssembler::SizeForNumberOfSlots(kJumpTableSlotCount);
 
-#if V8_TARGET_ARCH_ARM64
+#if V8_TARGET_ARCH_ARM64 || V8_TARGET_ARCH_X64
 constexpr uint32_t kAvailableBufferSlots =
     (kMaxWasmCodeMemory - kJumpTableSize) / AssemblerBase::kMinimalBufferSize;
 constexpr uint32_t kBufferSlotStartOffset =
@@ -49,7 +45,7 @@ Address GenerateJumpTableThunk(
     Address jump_target, byte* thunk_slot_buffer,
     std::bitset<kAvailableBufferSlots>* used_slots,
     std::vector<std::unique_ptr<TestingAssemblerBuffer>>* thunk_buffers) {
-#if V8_TARGET_ARCH_ARM64
+#if V8_TARGET_ARCH_ARM64 || V8_TARGET_ARCH_X64
   // To guarantee that the branch range lies within the near-call range,
   // generate the thunk in the same (kMaxWasmCodeMemory-sized) buffer as the
   // jump_target itself.
@@ -68,9 +64,6 @@ Address GenerateJumpTableThunk(
   used_slots->set(buffer_index);
   byte* buffer =
       thunk_slot_buffer + buffer_index * AssemblerBase::kMinimalBufferSize;
-
-  DCHECK(TurboAssembler::IsNearCallOffset(
-      (reinterpret_cast<byte*>(jump_target) - buffer) / kInstrSize));
 
 #else
   USE(thunk_slot_buffer);
@@ -109,6 +102,30 @@ Address GenerateJumpTableThunk(
   __ Tbnz(scratch, 0, &exit);
   __ Mov(scratch, Immediate(jump_target, RelocInfo::NONE));
   __ Br(scratch);
+#elif V8_TARGET_ARCH_PPC64
+  __ mov(scratch, Operand(stop_bit_address, RelocInfo::NONE));
+  __ LoadP(scratch, MemOperand(scratch));
+  __ cmpi(scratch, Operand::Zero());
+  __ bne(&exit);
+  __ mov(scratch, Operand(jump_target, RelocInfo::NONE));
+  __ Jump(scratch);
+#elif V8_TARGET_ARCH_S390X
+  __ mov(scratch, Operand(stop_bit_address, RelocInfo::NONE));
+  __ LoadP(scratch, MemOperand(scratch));
+  __ CmpP(scratch, Operand(0));
+  __ bne(&exit);
+  __ mov(scratch, Operand(jump_target, RelocInfo::NONE));
+  __ Jump(scratch);
+#elif V8_TARGET_ARCH_MIPS64
+  __ li(scratch, Operand(stop_bit_address, RelocInfo::NONE));
+  __ Lw(scratch, MemOperand(scratch, 0));
+  __ Branch(&exit, ne, scratch, Operand(zero_reg));
+  __ Jump(jump_target, RelocInfo::NONE);
+#elif V8_TARGET_ARCH_MIPS
+  __ li(scratch, Operand(stop_bit_address, RelocInfo::NONE));
+  __ lw(scratch, MemOperand(scratch, 0));
+  __ Branch(&exit, ne, scratch, Operand(zero_reg));
+  __ Jump(jump_target, RelocInfo::NONE);
 #else
 #error Unsupported architecture
 #endif
@@ -182,7 +199,7 @@ class JumpTablePatcher : public v8::base::Thread {
 TEST(JumpTablePatchingStress) {
   constexpr int kNumberOfRunnerThreads = 5;
 
-#if V8_TARGET_ARCH_ARM64
+#if V8_TARGET_ARCH_ARM64 || V8_TARGET_ARCH_X64
   // We need the branches (from GenerateJumpTableThunk) to be within near-call
   // range of the jump table slots. The address hint to AllocateAssemblerBuffer
   // is not reliable enough to guarantee that we can always achieve this with
@@ -198,6 +215,7 @@ TEST(JumpTablePatchingStress) {
   auto buffer = AllocateAssemblerBuffer(kJumpTableSize);
   byte* thunk_slot_buffer = nullptr;
 #endif
+
   std::bitset<kAvailableBufferSlots> used_thunk_slots;
   buffer->MakeWritableAndExecutable();
 
@@ -235,9 +253,6 @@ TEST(JumpTablePatchingStress) {
     for (auto& runner : runners) runner.Join();
   }
 }
-
-#endif  // V8_TARGET_ARCH_X64 || V8_TARGET_ARCH_IA32 || V8_TARGET_ARCH_ARM ||
-        // V8_TARGET_ARCH_ARM64
 
 #undef __
 #undef TRACE

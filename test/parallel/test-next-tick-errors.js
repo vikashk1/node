@@ -61,7 +61,9 @@ testNextTickWith('str');
 testNextTickWith({});
 testNextTickWith([]);
 
-process.on('uncaughtException', function() {
+process.on('uncaughtException', function(err, errorOrigin) {
+  assert.strictEqual(errorOrigin, 'uncaughtException');
+
   if (!exceptionHandled) {
     exceptionHandled = true;
     order.push('B');
@@ -72,5 +74,5 @@ process.on('uncaughtException', function() {
 });
 
 process.on('exit', function() {
-  assert.deepStrictEqual(['A', 'B', 'C'], order);
+  assert.deepStrictEqual(order, ['A', 'B', 'C']);
 });

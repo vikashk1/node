@@ -17,7 +17,7 @@ ls.stdout.on('data', (data) => {
 });
 
 ls.stderr.on('data', (data) => {
-  console.log(`stderr: ${data}`);
+  console.error(`stderr: ${data}`);
 });
 
 ls.on('close', (code) => {
@@ -93,7 +93,7 @@ When running on Windows, `.bat` and `.cmd` files can be invoked using
 spaces it needs to be quoted.
 
 ```js
-// On Windows Only ...
+// On Windows Only...
 const { spawn } = require('child_process');
 const bat = spawn('cmd.exe', ['/c', 'my.bat']);
 
@@ -102,7 +102,7 @@ bat.stdout.on('data', (data) => {
 });
 
 bat.stderr.on('data', (data) => {
-  console.log(data.toString());
+  console.error(data.toString());
 });
 
 bat.on('exit', (code) => {
@@ -142,16 +142,16 @@ changes:
 * `options` {Object}
   * `cwd` {string} Current working directory of the child process.
     **Default:** `null`.
-  * `env` {Object} Environment key-value pairs. **Default:** `null`.
+  * `env` {Object} Environment key-value pairs. **Default:** `process.env`.
   * `encoding` {string} **Default:** `'utf8'`
   * `shell` {string} Shell to execute the command with. See
     [Shell Requirements][] and [Default Windows Shell][]. **Default:**
-    `'/bin/sh'` on UNIX, `process.env.ComSpec` on Windows.
+    `'/bin/sh'` on Unix, `process.env.ComSpec` on Windows.
   * `timeout` {number} **Default:** `0`
   * `maxBuffer` {number} Largest amount of data in bytes allowed on stdout or
     stderr. If exceeded, the child process is terminated and any output is
     truncated. See caveat at [`maxBuffer` and Unicode][].
-    **Default:** `200 * 1024`.
+    **Default:** `1024 * 1024`.
   * `killSignal` {string|integer} **Default:** `'SIGTERM'`
   * `uid` {number} Sets the user identity of the process (see setuid(2)).
   * `gid` {number} Sets the group identity of the process (see setgid(2)).
@@ -171,10 +171,10 @@ need to be dealt with accordingly:
 ```js
 exec('"/path/to/test file/test.sh" arg1 arg2');
 // Double quotes are used so that the space in the path is not interpreted as
-// multiple arguments
+// a delimiter of multiple arguments.
 
 exec('echo "The \\$HOME variable is $HOME"');
-// The $HOME variable is escaped in the first instance, but not in the second
+// The $HOME variable is escaped in the first instance, but not in the second.
 ```
 
 **Never pass unsanitized user input to this function. Any input containing shell
@@ -202,7 +202,7 @@ exec('cat *.js missing_file | wc -l', (error, stdout, stderr) => {
     return;
   }
   console.log(`stdout: ${stdout}`);
-  console.log(`stderr: ${stderr}`);
+  console.error(`stderr: ${stderr}`);
 });
 ```
 
@@ -214,10 +214,11 @@ Unlike the exec(3) POSIX system call, `child_process.exec()` does not replace
 the existing process and uses a shell to execute the command.
 
 If this method is invoked as its [`util.promisify()`][]ed version, it returns
-a `Promise` for an `Object` with `stdout` and `stderr` properties. In case of an
-error (including any error resulting in an exit code other than 0), a rejected
-promise is returned, with the same `error` object given in the callback, but
-with an additional two properties `stdout` and `stderr`.
+a `Promise` for an `Object` with `stdout` and `stderr` properties. The returned
+`ChildProcess` instance is attached to the `Promise` as a `child` property. In
+case of an error (including any error resulting in an exit code other than 0), a
+rejected promise is returned, with the same `error` object given in the
+callback, but with two additional properties `stdout` and `stderr`.
 
 ```js
 const util = require('util');
@@ -226,7 +227,7 @@ const exec = util.promisify(require('child_process').exec);
 async function lsExample() {
   const { stdout, stderr } = await exec('ls');
   console.log('stdout:', stdout);
-  console.log('stderr:', stderr);
+  console.error('stderr:', stderr);
 }
 lsExample();
 ```
@@ -244,13 +245,13 @@ changes:
 * `args` {string[]} List of string arguments.
 * `options` {Object}
   * `cwd` {string} Current working directory of the child process.
-  * `env` {Object} Environment key-value pairs.
+  * `env` {Object} Environment key-value pairs. **Default:** `process.env`.
   * `encoding` {string} **Default:** `'utf8'`
   * `timeout` {number} **Default:** `0`
   * `maxBuffer` {number} Largest amount of data in bytes allowed on stdout or
     stderr. If exceeded, the child process is terminated and any output is
     truncated. See caveat at [`maxBuffer` and Unicode][].
-    **Default:** `200 * 1024`.
+    **Default:** `1024 * 1024`.
   * `killSignal` {string|integer} **Default:** `'SIGTERM'`
   * `uid` {number} Sets the user identity of the process (see setuid(2)).
   * `gid` {number} Sets the group identity of the process (see setgid(2)).
@@ -259,7 +260,7 @@ changes:
   * `windowsVerbatimArguments` {boolean} No quoting or escaping of arguments is
     done on Windows. Ignored on Unix. **Default:** `false`.
   * `shell` {boolean|string} If `true`, runs `command` inside of a shell. Uses
-    `'/bin/sh'` on UNIX, and `process.env.ComSpec` on Windows. A different
+    `'/bin/sh'` on Unix, and `process.env.ComSpec` on Windows. A different
     shell can be specified as a string. See [Shell Requirements][] and
     [Default Windows Shell][]. **Default:** `false` (no shell).
 * `callback` {Function} Called with the output when process terminates.
@@ -295,10 +296,11 @@ stderr output. If `encoding` is `'buffer'`, or an unrecognized character
 encoding, `Buffer` objects will be passed to the callback instead.
 
 If this method is invoked as its [`util.promisify()`][]ed version, it returns
-a `Promise` for an `Object` with `stdout` and `stderr` properties. In case of an
-error (including any error resulting in an exit code other than 0), a rejected
-promise is returned, with the same `error` object given in the
-callback, but with an additional two properties `stdout` and `stderr`.
+a `Promise` for an `Object` with `stdout` and `stderr` properties. The returned
+`ChildProcess` instance is attached to the `Promise` as a `child` property. In
+case of an error (including any error resulting in an exit code other than 0), a
+rejected promise is returned, with the same `error` object given in the
+callback, but with two additional properties `stdout` and `stderr`.
 
 ```js
 const util = require('util');
@@ -333,7 +335,7 @@ changes:
   * `detached` {boolean} Prepare child to run independently of its parent
     process. Specific behavior depends on the platform, see
     [`options.detached`][]).
-  * `env` {Object} Environment key-value pairs.
+  * `env` {Object} Environment key-value pairs.  **Default:** `process.env`.
   * `execPath` {string} Executable used to create the child process.
   * `execArgv` {string[]} List of string arguments passed to the executable.
     **Default:** `process.execArgv`.
@@ -398,7 +400,7 @@ changes:
 * `args` {string[]} List of string arguments.
 * `options` {Object}
   * `cwd` {string} Current working directory of the child process.
-  * `env` {Object} Environment key-value pairs.
+  * `env` {Object} Environment key-value pairs. **Default:** `process.env`.
   * `argv0` {string} Explicitly set the value of `argv[0]` sent to the child
     process. This will be set to `command` if not specified.
   * `stdio` {Array|string} Child's stdio configuration (see
@@ -409,7 +411,7 @@ changes:
   * `uid` {number} Sets the user identity of the process (see setuid(2)).
   * `gid` {number} Sets the group identity of the process (see setgid(2)).
   * `shell` {boolean|string} If `true`, runs `command` inside of a shell. Uses
-    `'/bin/sh'` on UNIX, and `process.env.ComSpec` on Windows. A different
+    `'/bin/sh'` on Unix, and `process.env.ComSpec` on Windows. A different
     shell can be specified as a string. See [Shell Requirements][] and
     [Default Windows Shell][]. **Default:** `false` (no shell).
   * `windowsVerbatimArguments` {boolean} No quoting or escaping of arguments is
@@ -456,7 +458,7 @@ ls.stdout.on('data', (data) => {
 });
 
 ls.stderr.on('data', (data) => {
-  console.log(`stderr: ${data}`);
+  console.error(`stderr: ${data}`);
 });
 
 ls.on('close', (code) => {
@@ -476,7 +478,7 @@ ps.stdout.on('data', (data) => {
 });
 
 ps.stderr.on('data', (data) => {
-  console.log(`ps stderr: ${data}`);
+  console.error(`ps stderr: ${data}`);
 });
 
 ps.on('close', (code) => {
@@ -491,7 +493,7 @@ grep.stdout.on('data', (data) => {
 });
 
 grep.stderr.on('data', (data) => {
-  console.log(`grep stderr: ${data}`);
+  console.error(`grep stderr: ${data}`);
 });
 
 grep.on('close', (code) => {
@@ -508,7 +510,7 @@ const { spawn } = require('child_process');
 const subprocess = spawn('bad_command');
 
 subprocess.on('error', (err) => {
-  console.log('Failed to start subprocess.');
+  console.error('Failed to start subprocess.');
 });
 ```
 
@@ -607,8 +609,8 @@ pipes between the parent and child. The value is one of the following:
 
 1. `'pipe'` - Create a pipe between the child process and the parent process.
    The parent end of the pipe is exposed to the parent as a property on the
-   `child_process` object as [`subprocess.stdio[fd]`][`stdio`]. Pipes created
-   for fds 0 - 2 are also available as [`subprocess.stdin`][],
+   `child_process` object as [`subprocess.stdio[fd]`][`subprocess.stdio`]. Pipes
+   created for fds 0 - 2 are also available as [`subprocess.stdin`][],
    [`subprocess.stdout`][] and [`subprocess.stderr`][], respectively.
 2. `'ipc'` - Create an IPC channel for passing messages/file descriptors
    between parent and child. A [`ChildProcess`][] may have at most one IPC
@@ -646,10 +648,10 @@ pipes between the parent and child. The value is one of the following:
 ```js
 const { spawn } = require('child_process');
 
-// Child will use parent's stdios
+// Child will use parent's stdios.
 spawn('prg', [], { stdio: 'inherit' });
 
-// Spawn child sharing only stderr
+// Spawn child sharing only stderr.
 spawn('prg', [], { stdio: ['pipe', 'pipe', process.stderr] });
 
 // Open an extra fd=4, to interact with programs presenting a
@@ -664,7 +666,7 @@ child registers an event handler for the [`'disconnect'`][] event
 or the [`'message'`][] event. This allows the child to exit
 normally without the process being held open by the open IPC channel.*
 
-On UNIX-like operating systems, the [`child_process.spawn()`][] method
+On Unix-like operating systems, the [`child_process.spawn()`][] method
 performs memory operations synchronously before decoupling the event loop
 from the child. Applications with a large memory footprint may find frequent
 [`child_process.spawn()`][] calls to be a bottleneck. For more information,
@@ -712,7 +714,7 @@ changes:
   * `stdio` {string|Array} Child's stdio configuration. `stderr` by default will
     be output to the parent process' stderr unless `stdio` is specified.
     **Default:** `'pipe'`.
-  * `env` {Object} Environment key-value pairs.
+  * `env` {Object} Environment key-value pairs.  **Default:** `process.env`.
   * `uid` {number} Sets the user identity of the process (see setuid(2)).
   * `gid` {number} Sets the group identity of the process (see setgid(2)).
   * `timeout` {number} In milliseconds the maximum amount of time the process
@@ -721,13 +723,13 @@ changes:
     process will be killed. **Default:** `'SIGTERM'`.
   * `maxBuffer` {number} Largest amount of data in bytes allowed on stdout or
     stderr. If exceeded, the child process is terminated. See caveat at
-    [`maxBuffer` and Unicode][]. **Default:** `200 * 1024`.
+    [`maxBuffer` and Unicode][]. **Default:** `1024 * 1024`.
   * `encoding` {string} The encoding used for all stdio inputs and outputs.
     **Default:** `'buffer'`.
   * `windowsHide` {boolean} Hide the subprocess console window that would
     normally be created on Windows systems. **Default:** `false`.
   * `shell` {boolean|string} If `true`, runs `command` inside of a shell. Uses
-    `'/bin/sh'` on UNIX, and `process.env.ComSpec` on Windows. A different
+    `'/bin/sh'` on Unix, and `process.env.ComSpec` on Windows. A different
     shell can be specified as a string. See [Shell Requirements][] and
     [Default Windows Shell][]. **Default:** `false` (no shell).
 * Returns: {Buffer|string} The stdout from the command.
@@ -775,10 +777,10 @@ changes:
   * `stdio` {string|Array} Child's stdio configuration. `stderr` by default will
     be output to the parent process' stderr unless `stdio` is specified.
     **Default:** `'pipe'`.
-  * `env` {Object} Environment key-value pairs.
+  * `env` {Object} Environment key-value pairs. **Default:** `process.env`.
   * `shell` {string} Shell to execute the command with. See
     [Shell Requirements][] and [Default Windows Shell][]. **Default:**
-    `'/bin/sh'` on UNIX, `process.env.ComSpec` on Windows.
+    `'/bin/sh'` on Unix, `process.env.ComSpec` on Windows.
   * `uid` {number} Sets the user identity of the process. (See setuid(2)).
   * `gid` {number} Sets the group identity of the process. (See setgid(2)).
   * `timeout` {number} In milliseconds the maximum amount of time the process
@@ -788,7 +790,7 @@ changes:
   * `maxBuffer` {number} Largest amount of data in bytes allowed on stdout or
     stderr. If exceeded, the child process is terminated and any output is
     truncated. See caveat at [`maxBuffer` and Unicode][].
-    **Default:** `200 * 1024`.
+    **Default:** `1024 * 1024`.
   * `encoding` {string} The encoding used for all stdio inputs and outputs.
     **Default:** `'buffer'`.
   * `windowsHide` {boolean} Hide the subprocess console window that would
@@ -842,7 +844,7 @@ changes:
   * `argv0` {string} Explicitly set the value of `argv[0]` sent to the child
     process. This will be set to `command` if not specified.
   * `stdio` {string|Array} Child's stdio configuration.
-  * `env` {Object} Environment key-value pairs.
+  * `env` {Object} Environment key-value pairs.  **Default:** `process.env`.
   * `uid` {number} Sets the user identity of the process (see setuid(2)).
   * `gid` {number} Sets the group identity of the process (see setgid(2)).
   * `timeout` {number} In milliseconds the maximum amount of time the process
@@ -852,11 +854,11 @@ changes:
   * `maxBuffer` {number} Largest amount of data in bytes allowed on stdout or
     stderr. If exceeded, the child process is terminated and any output is
     truncated. See caveat at [`maxBuffer` and Unicode][].
-    **Default:** `200 * 1024`.
+    **Default:** `1024 * 1024`.
   * `encoding` {string} The encoding used for all stdio inputs and outputs.
     **Default:** `'buffer'`.
   * `shell` {boolean|string} If `true`, runs `command` inside of a shell. Uses
-    `'/bin/sh'` on UNIX, and `process.env.ComSpec` on Windows. A different
+    `'/bin/sh'` on Unix, and `process.env.ComSpec` on Windows. A different
     shell can be specified as a string. See [Shell Requirements][] and
     [Default Windows Shell][]. **Default:** `false` (no shell).
   * `windowsVerbatimArguments` {boolean} No quoting or escaping of arguments is
@@ -911,6 +913,23 @@ added: v0.7.7
 The `'close'` event is emitted when the stdio streams of a child process have
 been closed. This is distinct from the [`'exit'`][] event, since multiple
 processes might share the same stdio streams.
+
+```js
+const { spawn } = require('child_process');
+const ls = spawn('ls', ['-lh', '/usr']);
+
+ls.stdout.on('data', (data) => {
+  console.log(`stdout: ${data}`);
+});
+
+ls.on('close', (code) => {
+  console.log(`child process close all stdio with code ${code}`);
+});
+
+ls.on('exit', (code) => {
+  console.log(`child process exited with code ${code}`);
+});
+```
 
 ### Event: 'disconnect'
 <!-- YAML
@@ -1014,7 +1033,7 @@ process of being received. This will most often be triggered immediately after
 calling `subprocess.disconnect()`.
 
 When the child process is a Node.js instance (e.g. spawned using
-[`child_process.fork()`]), the `process.disconnect()` method can be invoked
+[`child_process.fork()`][]), the `process.disconnect()` method can be invoked
 within the child process to close the IPC channel as well.
 
 ### subprocess.kill([signal])
@@ -1022,7 +1041,7 @@ within the child process to close the IPC channel as well.
 added: v0.1.90
 -->
 
-* `signal` {string}
+* `signal` {number|string}
 
 The `subprocess.kill()` method sends a signal to the child process. If no
 argument is given, the process will be sent the `'SIGTERM'` signal. See
@@ -1037,7 +1056,7 @@ grep.on('close', (code, signal) => {
     `child process terminated due to receipt of signal ${signal}`);
 });
 
-// Send SIGHUP to process
+// Send SIGHUP to process.
 grep.kill('SIGHUP');
 ```
 
@@ -1073,7 +1092,7 @@ const subprocess = spawn(
 );
 
 setTimeout(() => {
-  subprocess.kill(); // Does not terminate the node process in the shell
+  subprocess.kill(); // Does not terminate the Node.js process in the shell.
 }, 2000);
 ```
 
@@ -1253,7 +1272,7 @@ can be handled by the parent and some by the child.
 While the example above uses a server created using the `net` module, `dgram`
 module servers use exactly the same workflow with the exceptions of listening on
 a `'message'` event instead of `'connection'` and using `server.bind()` instead
-of `server.listen()`. This is, however, currently only supported on UNIX
+of `server.listen()`. This is, however, currently only supported on Unix
 platforms.
 
 #### Example: sending a socket object
@@ -1272,12 +1291,12 @@ const special = fork('subprocess.js', ['special']);
 const server = require('net').createServer({ pauseOnConnect: true });
 server.on('connection', (socket) => {
 
-  // If this is special priority
+  // If this is special priority...
   if (socket.remoteAddress === '74.125.127.100') {
     special.send('socket', socket);
     return;
   }
-  // This is normal priority
+  // This is normal priority.
   normal.send('socket', socket);
 });
 server.listen(1337);
@@ -1365,9 +1384,9 @@ const child_process = require('child_process');
 
 const subprocess = child_process.spawn('ls', {
   stdio: [
-    0, // Use parent's stdin for child
-    'pipe', // Pipe child's stdout to parent
-    fs.openSync('err.out', 'w') // Direct child's stderr to a file
+    0, // Use parent's stdin for child.
+    'pipe', // Pipe child's stdout to parent.
+    fs.openSync('err.out', 'w') // Direct child's stderr to a file.
   ]
 });
 
@@ -1395,6 +1414,16 @@ then this will be `null`.
 
 `subprocess.stdout` is an alias for `subprocess.stdio[1]`. Both properties will
 refer to the same value.
+
+```js
+const { spawn } = require('child_process');
+
+const subprocess = spawn('ls');
+
+subprocess.stdout.on('data', (data) => {
+  console.log(`Received chunk ${data}`);
+});
+```
 
 ### subprocess.unref()
 <!-- YAML
@@ -1470,6 +1499,7 @@ unavailable.
 [`subprocess.send()`]: #child_process_subprocess_send_message_sendhandle_options_callback
 [`subprocess.stderr`]: #child_process_subprocess_stderr
 [`subprocess.stdin`]: #child_process_subprocess_stdin
+[`subprocess.stdio`]: #child_process_subprocess_stdio
 [`subprocess.stdout`]: #child_process_subprocess_stdout
 [`util.promisify()`]: util.html#util_util_promisify_original
 [Default Windows Shell]: #child_process_default_windows_shell

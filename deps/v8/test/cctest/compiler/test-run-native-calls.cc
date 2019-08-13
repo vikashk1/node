@@ -4,18 +4,18 @@
 
 #include <vector>
 
-#include "src/assembler.h"
 #include "src/base/overflowing-math.h"
+#include "src/codegen/assembler.h"
+#include "src/codegen/machine-type.h"
+#include "src/codegen/register-configuration.h"
 #include "src/compiler/linkage.h"
 #include "src/compiler/raw-machine-assembler.h"
-#include "src/machine-type.h"
-#include "src/objects-inl.h"
-#include "src/register-configuration.h"
+#include "src/objects/objects-inl.h"
 #include "src/wasm/wasm-linkage.h"
 
 #include "test/cctest/cctest.h"
 #include "test/cctest/compiler/codegen-tester.h"
-#include "test/cctest/compiler/graph-builder-tester.h"
+#include "test/cctest/compiler/graph-and-builders.h"
 #include "test/cctest/compiler/value-helper.h"
 
 namespace v8 {
@@ -24,8 +24,8 @@ namespace compiler {
 namespace test_run_native_calls {
 
 namespace {
-typedef float float32;
-typedef double float64;
+using float32 = float;
+using float64 = double;
 
 // Picks a representative pair of integers from the given range.
 // If there are less than {max_pairs} possible pairs, do them all, otherwise try
@@ -143,7 +143,7 @@ class Allocator {
   }
   int StackWords(MachineType type) {
     int size = 1 << ElementSizeLog2Of(type.representation());
-    return size <= kPointerSize ? 1 : size / kPointerSize;
+    return size <= kSystemPointerSize ? 1 : size / kSystemPointerSize;
   }
   void Reset() {
     stack_offset_ = 0;
@@ -542,9 +542,9 @@ static void TestInt32Sub(CallDescriptor* desc) {
 
   FOR_INT32_INPUTS(i) {
     FOR_INT32_INPUTS(j) {
-      int32_t expected = static_cast<int32_t>(static_cast<uint32_t>(*i) -
-                                              static_cast<uint32_t>(*j));
-      int32_t result = runnable.Call(*i, *j);
+      int32_t expected = static_cast<int32_t>(static_cast<uint32_t>(i) -
+                                              static_cast<uint32_t>(j));
+      int32_t result = runnable.Call(i, j);
       CHECK_EQ(expected, result);
     }
   }
@@ -831,7 +831,8 @@ TEST_INT32_SELECT(63)
 
 TEST(Int64Select_registers) {
   if (GetRegConfig()->num_allocatable_general_registers() < 2) return;
-  if (kPointerSize < 8) return;  // TODO(titzer): int64 on 32-bit platforms
+  // TODO(titzer): int64 on 32-bit platforms
+  if (kSystemPointerSize < 8) return;
 
   int rarray[] = {GetRegConfig()->GetAllocatableGeneralCode(0)};
   ArgsBuffer<int64_t>::Sig sig(2);

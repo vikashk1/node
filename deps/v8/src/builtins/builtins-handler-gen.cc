@@ -4,10 +4,10 @@
 
 #include "src/builtins/builtins-utils-gen.h"
 #include "src/builtins/builtins.h"
-#include "src/code-stub-assembler.h"
+#include "src/codegen/code-stub-assembler.h"
 #include "src/ic/ic.h"
 #include "src/ic/keyed-store-generic.h"
-#include "src/objects-inl.h"
+#include "src/objects/objects-inl.h"
 
 namespace v8 {
 namespace internal {
@@ -26,13 +26,13 @@ class HandlerBuiltinsAssembler : public CodeStubAssembler {
   // compile-time types (int) by dispatching over the runtime type and
   // emitting a specialized copy of the given case function for each elements
   // kind. Use with caution. This produces a *lot* of code.
-  typedef std::function<void(ElementsKind)> ElementsKindSwitchCase;
+  using ElementsKindSwitchCase = std::function<void(ElementsKind)>;
   void DispatchByElementsKind(TNode<Int32T> elements_kind,
                               const ElementsKindSwitchCase& case_function);
 
   // Dispatches over all possible combinations of {from,to} elements kinds.
-  typedef std::function<void(ElementsKind, ElementsKind)>
-      ElementsKindTransitionSwitchCase;
+  using ElementsKindTransitionSwitchCase =
+      std::function<void(ElementsKind, ElementsKind)>;
   void DispatchForElementsKindTransition(
       TNode<Int32T> from_kind, TNode<Int32T> to_kind,
       const ElementsKindTransitionSwitchCase& case_function);
@@ -70,19 +70,18 @@ void Builtins::Generate_StoreIC_Uninitialized(
   StoreICUninitializedGenerator::Generate(state);
 }
 
+// TODO(mythria): Check if we can remove feedback vector and slot parameters in
+// descriptor.
 void HandlerBuiltinsAssembler::Generate_KeyedStoreIC_Slow() {
-  typedef StoreWithVectorDescriptor Descriptor;
+  using Descriptor = StoreWithVectorDescriptor;
   Node* receiver = Parameter(Descriptor::kReceiver);
   Node* name = Parameter(Descriptor::kName);
   Node* value = Parameter(Descriptor::kValue);
-  Node* slot = Parameter(Descriptor::kSlot);
-  Node* vector = Parameter(Descriptor::kVector);
   Node* context = Parameter(Descriptor::kContext);
 
   // The slow case calls into the runtime to complete the store without causing
   // an IC miss that would otherwise cause a transition to the generic stub.
-  TailCallRuntime(Runtime::kKeyedStoreIC_Slow, context, value, slot, vector,
-                  receiver, name);
+  TailCallRuntime(Runtime::kKeyedStoreIC_Slow, context, value, receiver, name);
 }
 
 TF_BUILTIN(KeyedStoreIC_Slow, HandlerBuiltinsAssembler) {
@@ -107,7 +106,7 @@ TF_BUILTIN(KeyedStoreIC_Slow_NoTransitionHandleCOW, HandlerBuiltinsAssembler) {
 }
 
 void HandlerBuiltinsAssembler::Generate_StoreInArrayLiteralIC_Slow() {
-  typedef StoreWithVectorDescriptor Descriptor;
+  using Descriptor = StoreWithVectorDescriptor;
   Node* array = Parameter(Descriptor::kReceiver);
   Node* index = Parameter(Descriptor::kName);
   Node* value = Parameter(Descriptor::kValue);
@@ -205,7 +204,7 @@ void HandlerBuiltinsAssembler::DispatchForElementsKindTransition(
 
 void HandlerBuiltinsAssembler::Generate_ElementsTransitionAndStore(
     KeyedAccessStoreMode store_mode) {
-  typedef StoreTransitionDescriptor Descriptor;
+  using Descriptor = StoreTransitionDescriptor;
   Node* receiver = Parameter(Descriptor::kReceiver);
   Node* key = Parameter(Descriptor::kName);
   Node* value = Parameter(Descriptor::kValue);
@@ -244,17 +243,17 @@ TF_BUILTIN(ElementsTransitionAndStore_Standard, HandlerBuiltinsAssembler) {
 
 TF_BUILTIN(ElementsTransitionAndStore_GrowNoTransitionHandleCOW,
            HandlerBuiltinsAssembler) {
-  Generate_ElementsTransitionAndStore(STORE_AND_GROW_NO_TRANSITION_HANDLE_COW);
+  Generate_ElementsTransitionAndStore(STORE_AND_GROW_HANDLE_COW);
 }
 
 TF_BUILTIN(ElementsTransitionAndStore_NoTransitionIgnoreOOB,
            HandlerBuiltinsAssembler) {
-  Generate_ElementsTransitionAndStore(STORE_NO_TRANSITION_IGNORE_OUT_OF_BOUNDS);
+  Generate_ElementsTransitionAndStore(STORE_IGNORE_OUT_OF_BOUNDS);
 }
 
 TF_BUILTIN(ElementsTransitionAndStore_NoTransitionHandleCOW,
            HandlerBuiltinsAssembler) {
-  Generate_ElementsTransitionAndStore(STORE_NO_TRANSITION_HANDLE_COW);
+  Generate_ElementsTransitionAndStore(STORE_HANDLE_COW);
 }
 
 // All elements kinds handled by EmitElementStore. Specifically, this includes
@@ -263,7 +262,9 @@ TF_BUILTIN(ElementsTransitionAndStore_NoTransitionHandleCOW,
   V(PACKED_SMI_ELEMENTS)    \
   V(HOLEY_SMI_ELEMENTS)     \
   V(PACKED_ELEMENTS)        \
+  V(PACKED_SEALED_ELEMENTS) \
   V(HOLEY_ELEMENTS)         \
+  V(HOLEY_SEALED_ELEMENTS)  \
   V(PACKED_DOUBLE_ELEMENTS) \
   V(HOLEY_DOUBLE_ELEMENTS)  \
   V(UINT8_ELEMENTS)         \
@@ -302,11 +303,17 @@ void HandlerBuiltinsAssembler::DispatchByElementsKind(
   Switch(elements_kind, &if_unknown_type, elements_kinds, elements_kind_labels,
          arraysize(elements_kinds));
 
-#define ELEMENTS_KINDS_CASE(KIND) \
-  BIND(&if_##KIND);               \
-  {                               \
-    case_function(KIND);          \
-    Goto(&next);                  \
+#define ELEMENTS_KINDS_CASE(KIND)                                \
+  BIND(&if_##KIND);                                              \
+  {                                                              \
+    if (!FLAG_enable_sealed_frozen_elements_kind &&              \
+        IsFrozenOrSealedElementsKindUnchecked(KIND)) {           \
+      /* Disable support for frozen or sealed elements kinds. */ \
+      Unreachable();                                             \
+    } else {                                                     \
+      case_function(KIND);                                       \
+      Goto(&next);                                               \
+    }                                                            \
   }
   ELEMENTS_KINDS(ELEMENTS_KINDS_CASE)
 #undef ELEMENTS_KINDS_CASE
@@ -321,7 +328,7 @@ void HandlerBuiltinsAssembler::DispatchByElementsKind(
 
 void HandlerBuiltinsAssembler::Generate_StoreFastElementIC(
     KeyedAccessStoreMode store_mode) {
-  typedef StoreWithVectorDescriptor Descriptor;
+  using Descriptor = StoreWithVectorDescriptor;
   Node* receiver = Parameter(Descriptor::kReceiver);
   Node* key = Parameter(Descriptor::kName);
   Node* value = Parameter(Descriptor::kValue);
@@ -352,15 +359,15 @@ TF_BUILTIN(StoreFastElementIC_Standard, HandlerBuiltinsAssembler) {
 
 TF_BUILTIN(StoreFastElementIC_GrowNoTransitionHandleCOW,
            HandlerBuiltinsAssembler) {
-  Generate_StoreFastElementIC(STORE_AND_GROW_NO_TRANSITION_HANDLE_COW);
+  Generate_StoreFastElementIC(STORE_AND_GROW_HANDLE_COW);
 }
 
 TF_BUILTIN(StoreFastElementIC_NoTransitionIgnoreOOB, HandlerBuiltinsAssembler) {
-  Generate_StoreFastElementIC(STORE_NO_TRANSITION_IGNORE_OUT_OF_BOUNDS);
+  Generate_StoreFastElementIC(STORE_IGNORE_OUT_OF_BOUNDS);
 }
 
 TF_BUILTIN(StoreFastElementIC_NoTransitionHandleCOW, HandlerBuiltinsAssembler) {
-  Generate_StoreFastElementIC(STORE_NO_TRANSITION_HANDLE_COW);
+  Generate_StoreFastElementIC(STORE_HANDLE_COW);
 }
 
 TF_BUILTIN(LoadGlobalIC_Slow, CodeStubAssembler) {
@@ -429,7 +436,7 @@ TF_BUILTIN(KeyedLoadIC_SloppyArguments, CodeStubAssembler) {
 }
 
 void HandlerBuiltinsAssembler::Generate_KeyedStoreIC_SloppyArguments() {
-  typedef StoreWithVectorDescriptor Descriptor;
+  using Descriptor = StoreWithVectorDescriptor;
   Node* receiver = Parameter(Descriptor::kReceiver);
   Node* key = Parameter(Descriptor::kName);
   Node* value = Parameter(Descriptor::kValue);
@@ -492,6 +499,51 @@ TF_BUILTIN(LoadIndexedInterceptorIC, CodeStubAssembler) {
   BIND(&if_keyisinvalid);
   TailCallRuntime(Runtime::kKeyedLoadIC_Miss, context, receiver, key, slot,
                   vector);
+}
+
+TF_BUILTIN(KeyedHasIC_SloppyArguments, CodeStubAssembler) {
+  Node* receiver = Parameter(Descriptor::kReceiver);
+  Node* key = Parameter(Descriptor::kName);
+  Node* slot = Parameter(Descriptor::kSlot);
+  Node* vector = Parameter(Descriptor::kVector);
+  Node* context = Parameter(Descriptor::kContext);
+
+  Label miss(this);
+
+  Node* result = HasKeyedSloppyArguments(receiver, key, &miss);
+  Return(result);
+
+  BIND(&miss);
+  {
+    Comment("Miss");
+    TailCallRuntime(Runtime::kKeyedHasIC_Miss, context, receiver, key, slot,
+                    vector);
+  }
+}
+
+TF_BUILTIN(HasIndexedInterceptorIC, CodeStubAssembler) {
+  Node* receiver = Parameter(Descriptor::kReceiver);
+  Node* key = Parameter(Descriptor::kName);
+  Node* slot = Parameter(Descriptor::kSlot);
+  Node* vector = Parameter(Descriptor::kVector);
+  Node* context = Parameter(Descriptor::kContext);
+
+  Label if_keyispositivesmi(this), if_keyisinvalid(this);
+  Branch(TaggedIsPositiveSmi(key), &if_keyispositivesmi, &if_keyisinvalid);
+  BIND(&if_keyispositivesmi);
+  TailCallRuntime(Runtime::kHasElementWithInterceptor, context, receiver, key);
+
+  BIND(&if_keyisinvalid);
+  TailCallRuntime(Runtime::kKeyedHasIC_Miss, context, receiver, key, slot,
+                  vector);
+}
+
+TF_BUILTIN(HasIC_Slow, CodeStubAssembler) {
+  Node* receiver = Parameter(Descriptor::kReceiver);
+  Node* name = Parameter(Descriptor::kName);
+  Node* context = Parameter(Descriptor::kContext);
+
+  TailCallRuntime(Runtime::kHasProperty, context, receiver, name);
 }
 
 }  // namespace internal

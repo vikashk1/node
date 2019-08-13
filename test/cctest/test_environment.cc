@@ -23,6 +23,24 @@ class EnvironmentTest : public EnvironmentTestFixture {
   }
 };
 
+TEST_F(EnvironmentTest, PreExeuctionPreparation) {
+  const v8::HandleScope handle_scope(isolate_);
+  const Argv argv;
+  Env env {handle_scope, argv};
+
+  v8::Local<v8::Context> context = isolate_->GetCurrentContext();
+
+  const char* run_script = "process.argv0";
+  v8::Local<v8::Script> script = v8::Script::Compile(
+      context,
+      v8::String::NewFromOneByte(isolate_,
+                                 reinterpret_cast<const uint8_t*>(run_script),
+                                 v8::NewStringType::kNormal).ToLocalChecked())
+      .ToLocalChecked();
+  v8::Local<v8::Value> result = script->Run(context).ToLocalChecked();
+  CHECK(result->IsString());
+}
+
 TEST_F(EnvironmentTest, AtExitWithEnvironment) {
   const v8::HandleScope handle_scope(isolate_);
   const Argv argv;
@@ -68,6 +86,19 @@ TEST_F(EnvironmentTest, MultipleEnvironmentsPerIsolate) {
 
   RunAtExit(*env2);
   EXPECT_TRUE(called_cb_2);
+}
+
+TEST_F(EnvironmentTest, NoEnvironmentSanity) {
+  const v8::HandleScope handle_scope(isolate_);
+  v8::Local<v8::Context> context = v8::Context::New(isolate_);
+  EXPECT_EQ(node::Environment::GetCurrent(context), nullptr);
+  EXPECT_EQ(node::GetCurrentEnvironment(context), nullptr);
+  EXPECT_EQ(node::Environment::GetCurrent(isolate_), nullptr);
+
+  v8::Context::Scope context_scope(context);
+  EXPECT_EQ(node::Environment::GetCurrent(context), nullptr);
+  EXPECT_EQ(node::GetCurrentEnvironment(context), nullptr);
+  EXPECT_EQ(node::Environment::GetCurrent(isolate_), nullptr);
 }
 
 TEST_F(EnvironmentTest, NonNodeJSContext) {

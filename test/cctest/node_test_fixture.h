@@ -7,7 +7,8 @@
 #include "node.h"
 #include "node_platform.h"
 #include "node_internals.h"
-#include "env.h"
+#include "env-inl.h"
+#include "util-inl.h"
 #include "v8.h"
 #include "libplatform/libplatform.h"
 
@@ -106,6 +107,7 @@ class NodeTestFixture : public ::testing::Test {
   void TearDown() override {
     isolate_->Exit();
     isolate_->Dispose();
+    platform->DrainTasks(isolate_);
     platform->UnregisterIsolate(isolate_);
     isolate_ = nullptr;
   }
@@ -131,8 +133,6 @@ class EnvironmentTestFixture : public NodeTestFixture {
                                              1, *argv,
                                              argv.nr_args(), *argv);
       CHECK_NE(nullptr, environment_);
-      // TODO(addaleax): Make this a public API.
-      CHECK(!RunBootstrapping(environment_).IsEmpty());
     }
 
     ~Env() {

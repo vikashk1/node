@@ -1,8 +1,9 @@
 #ifndef SRC_JS_NATIVE_API_H_
 #define SRC_JS_NATIVE_API_H_
 
-#include <stddef.h>
-#include <stdbool.h>
+// This file needs to be compatible with C compilers.
+#include <stddef.h>   // NOLINT(modernize-deprecated-headers)
+#include <stdbool.h>  // NOLINT(modernize-deprecated-headers)
 #include "js_native_api_types.h"
 
 // Use INT_MAX, this should only be consumed by the pre-processor anyway.
@@ -11,7 +12,12 @@
 #ifdef NAPI_EXPERIMENTAL
 #define NAPI_VERSION NAPI_VERSION_EXPERIMENTAL
 #else
-// The baseline version for N-API
+// The baseline version for N-API.
+// The NAPI_VERSION controls which version will be used by default when
+// compilling a native addon. If the addon developer specifically wants to use
+// functions available in a new version of N-API that is not yet ported in all
+// LTS versions, they can set NAPI_VERSION knowing that they have specifically
+// depended on that version.
 #define NAPI_VERSION 4
 #endif
 #endif
@@ -493,6 +499,15 @@ NAPI_EXTERN napi_status napi_add_finalizer(napi_env env,
                                            napi_finalize finalize_cb,
                                            void* finalize_hint,
                                            napi_ref* result);
+
+// Instance data
+NAPI_EXTERN napi_status napi_set_instance_data(napi_env env,
+                                               void* data,
+                                               napi_finalize finalize_cb,
+                                               void* finalize_hint);
+
+NAPI_EXTERN napi_status napi_get_instance_data(napi_env env,
+                                               void** data);
 #endif  // NAPI_EXPERIMENTAL
 
 EXTERN_C_END

@@ -111,7 +111,7 @@ const asyncHook = async_hooks.createHook({
 });
 ```
 
-Note that the callbacks will be inherited via the prototype chain:
+The callbacks will be inherited via the prototype chain:
 
 ```js
 class MyAsyncCallbacks {
@@ -236,10 +236,10 @@ The `type` is a string identifying the type of resource that caused
 resource's constructor.
 
 ```text
-FSEVENTWRAP, FSREQCALLBACK, GETADDRINFOREQWRAP, GETNAMEINFOREQWRAP, HTTPPARSER,
-JSSTREAM, PIPECONNECTWRAP, PIPEWRAP, PROCESSWRAP, QUERYWRAP, SHUTDOWNWRAP,
-SIGNALWRAP, STATWATCHER, TCPCONNECTWRAP, TCPSERVERWRAP, TCPWRAP, TTYWRAP,
-UDPSENDWRAP, UDPWRAP, WRITEWRAP, ZLIB, SSLCONNECTION, PBKDF2REQUEST,
+FSEVENTWRAP, FSREQCALLBACK, GETADDRINFOREQWRAP, GETNAMEINFOREQWRAP, HTTPINCOMINGMESSAGE,
+HTTPCLIENTREQUEST, JSSTREAM, PIPECONNECTWRAP, PIPEWRAP, PROCESSWRAP, QUERYWRAP,
+SHUTDOWNWRAP, SIGNALWRAP, STATWATCHER, TCPCONNECTWRAP, TCPSERVERWRAP, TCPWRAP,
+TTYWRAP, UDPSENDWRAP, UDPWRAP, WRITEWRAP, ZLIB, SSLCONNECTION, PBKDF2REQUEST,
 RANDOMBYTESREQUEST, TLSWRAP, Microtask, Timeout, Immediate, TickObject
 ```
 
@@ -430,12 +430,16 @@ does not depend on garbage collection, then this will not be an issue.
 
 ##### promiseResolve(asyncId)
 
+<!-- YAML
+added: v8.6.0
+-->
+
 * `asyncId` {number}
 
 Called when the `resolve` function passed to the `Promise` constructor is
 invoked (either directly or through other means of resolving a promise).
 
-Note that `resolve()` does not do any observable synchronous work.
+`resolve()` does not do any observable synchronous work.
 
 The `Promise` is not necessarily fulfilled or rejected at this point if the
 `Promise` was resolved by assuming the state of another `Promise`.
@@ -493,7 +497,7 @@ const server = net.createServer((conn) => {
 });
 ```
 
-Note that promise contexts may not get precise `executionAsyncIds` by default.
+Promise contexts may not get precise `executionAsyncIds` by default.
 See the section on [promise execution tracking][].
 
 #### async_hooks.triggerAsyncId()
@@ -516,7 +520,7 @@ const server = net.createServer((conn) => {
 });
 ```
 
-Note that promise contexts may not get valid `triggerAsyncId`s by default. See
+Promise contexts may not get valid `triggerAsyncId`s by default. See
 the section on [promise execution tracking][].
 
 ## Promise execution tracking
@@ -536,7 +540,7 @@ Promise.resolve(1729).then(() => {
 ```
 
 Observe that the `then()` callback claims to have executed in the context of the
-outer scope even though there was an asynchronous hop involved. Also note that
+outer scope even though there was an asynchronous hop involved. Also,
 the `triggerAsyncId` value is `0`, which means that we are missing context about
 the resource that caused (triggered) the `then()` callback to be executed.
 

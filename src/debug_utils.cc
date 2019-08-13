@@ -1,4 +1,6 @@
 #include "debug_utils.h"
+#include "env-inl.h"
+#include "util-inl.h"
 
 #ifdef __POSIX__
 #if defined(__linux__)
@@ -24,9 +26,11 @@
 
 #endif  // __POSIX__
 
-#if defined(__linux__) || defined(__sun) || defined(__FreeBSD__)
+#if defined(__linux__) || defined(__sun) || \
+    defined(__FreeBSD__) || defined(__OpenBSD__)
 #include <link.h>
-#endif  // (__linux__) || defined(__sun) || defined(__FreeBSD__)
+#endif  // (__linux__) || defined(__sun) ||
+        // (__FreeBSD__) || defined(__OpenBSD__)
 
 #ifdef __APPLE__
 #include <mach-o/dyld.h>  // _dyld_get_image_name()
@@ -329,7 +333,7 @@ void PrintLibuvHandleInformation(uv_loop_t* loop, FILE* stream) {
 
 std::vector<std::string> NativeSymbolDebuggingContext::GetLoadedLibraries() {
   std::vector<std::string> list;
-#if defined(__linux__) || defined(__FreeBSD__)
+#if defined(__linux__) || defined(__FreeBSD__) || defined(__OpenBSD__)
   dl_iterate_phdr(
       [](struct dl_phdr_info* info, size_t size, void* data) {
         auto list = static_cast<std::vector<std::string>*>(data);

@@ -27,6 +27,18 @@
 #include <cstring>
 #include "util.h"
 
+// These are defined by <sys/byteorder.h> or <netinet/in.h> on some systems.
+// To avoid warnings, undefine them before redefining them.
+#ifdef BSWAP_2
+# undef BSWAP_2
+#endif
+#ifdef BSWAP_4
+# undef BSWAP_4
+#endif
+#ifdef BSWAP_8
+# undef BSWAP_8
+#endif
+
 #if defined(_MSC_VER)
 #include <intrin.h>
 #define BSWAP_2(x) _byteswap_ushort(x)
@@ -274,6 +286,17 @@ std::string ToLower(const std::string& in) {
   return out;
 }
 
+char ToUpper(char c) {
+  return c >= 'a' && c <= 'z' ? (c - 'a') + 'A' : c;
+}
+
+std::string ToUpper(const std::string& in) {
+  std::string out(in.size(), 0);
+  for (size_t i = 0; i < in.size(); ++i)
+    out[i] = ToUpper(in[i]);
+  return out;
+}
+
 bool StringEqualNoCase(const char* a, const char* b) {
   do {
     if (*a == '\0')
@@ -468,6 +491,13 @@ SlicedArguments::SlicedArguments(
 template <typename T, size_t S>
 ArrayBufferViewContents<T, S>::ArrayBufferViewContents(
     v8::Local<v8::Value> value) {
+  CHECK(value->IsArrayBufferView());
+  Read(value.As<v8::ArrayBufferView>());
+}
+
+template <typename T, size_t S>
+ArrayBufferViewContents<T, S>::ArrayBufferViewContents(
+    v8::Local<v8::Object> value) {
   CHECK(value->IsArrayBufferView());
   Read(value.As<v8::ArrayBufferView>());
 }

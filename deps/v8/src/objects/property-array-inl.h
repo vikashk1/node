@@ -9,6 +9,7 @@
 
 #include "src/heap/heap-write-barrier-inl.h"
 #include "src/objects/heap-object-inl.h"
+#include "src/objects/objects-inl.h"
 #include "src/objects/smi-inl.h"
 
 // Has to be the last include (doesn't have include guards):
@@ -74,6 +75,17 @@ void PropertyArray::SetHash(int hash) {
   int value = Smi::ToInt(value_obj);
   value = HashField::update(value, hash);
   WRITE_FIELD(*this, kLengthAndHashOffset, Smi::FromInt(value));
+}
+
+void PropertyArray::CopyElements(Isolate* isolate, int dst_index,
+                                 PropertyArray src, int src_index, int len,
+                                 WriteBarrierMode mode) {
+  if (len == 0) return;
+  DisallowHeapAllocation no_gc;
+
+  ObjectSlot dst_slot(data_start() + dst_index);
+  ObjectSlot src_slot(src.data_start() + src_index);
+  isolate->heap()->CopyRange(*this, dst_slot, src_slot, len, mode);
 }
 
 }  // namespace internal

@@ -177,7 +177,7 @@ added: v8.4.0
 
 The `'frameError'` event is emitted when an error occurs while attempting to
 send a frame on the session. If the frame that could not be sent is associated
-with a specific `Http2Stream`, an attempt to emit `'frameError'` event on the
+with a specific `Http2Stream`, an attempt to emit a `'frameError'` event on the
 `Http2Stream` is made.
 
 If the `'frameError'` event is associated with a stream, the stream will be
@@ -451,9 +451,9 @@ added: v8.4.0
 
 * {boolean}
 
-Indicates whether or not the `Http2Session` is currently waiting for an
-acknowledgment for a sent `SETTINGS` frame. Will be `true` after calling the
-`http2session.settings()` method. Will be `false` once all sent SETTINGS
+Indicates whether the `Http2Session` is currently waiting for acknowledgment of
+a sent `SETTINGS` frame. Will be `true` after calling the
+`http2session.settings()` method. Will be `false` once all sent `SETTINGS`
 frames have been acknowledged.
 
 #### http2session.ping([payload, ]callback)
@@ -572,12 +572,17 @@ Provides miscellaneous information about the current state of the
 
 An object describing the current status of this `Http2Session`.
 
-#### http2session.settings(settings)
+#### http2session.settings([settings][, callback])
 <!-- YAML
 added: v8.4.0
 -->
 
 * `settings` {HTTP/2 Settings Object}
+* `callback` {Function} Callback that is called once the session is connected or
+  right away if the session is already connected.
+  * `err` {Error|null}
+  * `settings` {HTTP/2 Settings Object} The updated `settings` object.
+  * `duration` {integer}
 
 Updates the current local settings for this `Http2Session` and sends a new
 `SETTINGS` frame to the connected HTTP/2 peer.
@@ -902,12 +907,13 @@ the value is `undefined`, the stream is not yet ready for use.
 
 All [`Http2Stream`][] instances are destroyed either when:
 
-* An `RST_STREAM` frame for the stream is received by the connected peer.
-* The `http2stream.close()` method is called.
+* An `RST_STREAM` frame for the stream is received by the connected peer,
+  and pending data has been read.
+* The `http2stream.close()` method is called, and pending data has been read.
 * The `http2stream.destroy()` or `http2session.destroy()` methods are called.
 
 When an `Http2Stream` instance is destroyed, an attempt will be made to send an
-`RST_STREAM` frame will be sent to the connected peer.
+`RST_STREAM` frame to the connected peer.
 
 When the `Http2Stream` instance is destroyed, the `'close'` event will
 be emitted. Because `Http2Stream` is an instance of `stream.Duplex`, the
@@ -982,7 +988,7 @@ The `'trailers'` event is emitted when a block of headers associated with
 trailing header fields is received. The listener callback is passed the
 [HTTP/2 Headers Object][] and flags associated with the headers.
 
-Note that this event might not be emitted if `http2stream.end()` is called
+This event might not be emitted if `http2stream.end()` is called
 before trailers are received and the incoming data is not being read or
 listened for.
 
@@ -1063,6 +1069,16 @@ added: v10.11.0
 Set the `true` if the `END_STREAM` flag was set in the request or response
 HEADERS frame received, indicating that no additional data should be received
 and the readable side of the `Http2Stream` will be closed.
+
+#### http2stream.id
+<!-- YAML
+added: v8.4.0
+-->
+
+* {number|undefined}
+
+The numeric stream identifier of this `Http2Stream` instance. Set to `undefined`
+if the stream identifier has not yet been assigned.
 
 #### http2stream.pending
 <!-- YAML
@@ -1472,7 +1488,7 @@ requests.
 
 The file descriptor is not closed when the stream is closed, so it will need
 to be closed manually once it is no longer needed.
-Note that using the same file descriptor concurrently for multiple streams
+Using the same file descriptor concurrently for multiple streams
 is not supported and may result in data loss. Re-using a file descriptor
 after a stream has finished is supported.
 
@@ -1653,7 +1669,7 @@ client should continue to send the request body, or generating an appropriate
 HTTP response (e.g. 400 Bad Request) if the client should not continue to send
 the request body.
 
-Note that when this event is emitted and handled, the [`'request'`][] event will
+When this event is emitted and handled, the [`'request'`][] event will
 not be emitted.
 
 #### Event: 'request'
@@ -1664,7 +1680,7 @@ added: v8.4.0
 * `request` {http2.Http2ServerRequest}
 * `response` {http2.Http2ServerResponse}
 
-Emitted each time there is a request. Note that there may be multiple requests
+Emitted each time there is a request. There may be multiple requests
 per session. See the [Compatibility API][].
 
 #### Event: 'session'
@@ -1717,11 +1733,15 @@ server.on('stream', (stream, headers, flags) => {
 #### Event: 'timeout'
 <!-- YAML
 added: v8.4.0
+changes:
+  - version: REPLACEME
+    pr-url: https://github.com/nodejs/node/pull/27558
+    description: The default timeout changed from 120s to 0 (no timeout).
 -->
 
 The `'timeout'` event is emitted when there is no activity on the Server for
 a given number of milliseconds set using `http2server.setTimeout()`.
-**Default:** 2 minutes.
+**Default:** 0 (no timeout)
 
 #### server.close([callback])
 <!-- YAML
@@ -1729,18 +1749,25 @@ added: v8.4.0
 -->
 * `callback` {Function}
 
-Stops the server from accepting new connections. See [`net.Server.close()`][].
+Stops the server from establishing new sessions. This does not prevent new
+request streams from being created due to the persistent nature of HTTP/2
+sessions. To gracefully shut down the server, call [`http2session.close()`] on
+all active sessions.
 
-Note that this is not analogous to restricting new requests since HTTP/2
-connections are persistent. To achieve a similar graceful shutdown behavior,
-consider also using [`http2session.close()`] on active sessions.
+If `callback` is provided, it is not invoked until all active sessions have been
+closed, although the server has already stopped allowing new sessions. See
+[`net.Server.close()`][] for more details.
 
 #### server.setTimeout([msecs][, callback])
 <!-- YAML
 added: v8.4.0
+changes:
+  - version: REPLACEME
+    pr-url: https://github.com/nodejs/node/pull/27558
+    description: The default timeout changed from 120s to 0 (no timeout).
 -->
 
-* `msecs` {number} **Default:** `120000` (2 minutes)
+* `msecs` {number} **Default:** 0 (no timeout)
 * `callback` {Function}
 * Returns: {Http2Server}
 
@@ -1783,7 +1810,7 @@ client should continue to send the request body, or generating an appropriate
 HTTP response (e.g. 400 Bad Request) if the client should not continue to send
 the request body.
 
-Note that when this event is emitted and handled, the [`'request'`][] event will
+When this event is emitted and handled, the [`'request'`][] event will
 not be emitted.
 
 #### Event: 'request'
@@ -1794,7 +1821,7 @@ added: v8.4.0
 * `request` {http2.Http2ServerRequest}
 * `response` {http2.Http2ServerResponse}
 
-Emitted each time there is a request. Note that there may be multiple requests
+Emitted each time there is a request. There may be multiple requests
 per session. See the [Compatibility API][].
 
 #### Event: 'session'
@@ -1871,11 +1898,14 @@ added: v8.4.0
 -->
 * `callback` {Function}
 
-Stops the server from accepting new connections. See [`tls.Server.close()`][].
+Stops the server from establishing new sessions. This does not prevent new
+request streams from being created due to the persistent nature of HTTP/2
+sessions. To gracefully shut down the server, call [`http2session.close()`] on
+all active sessions.
 
-Note that this is not analogous to restricting new requests since HTTP/2
-connections are persistent. To achieve a similar graceful shutdown behavior,
-consider also using [`http2session.close()`] on active sessions.
+If `callback` is provided, it is not invoked until all active sessions have been
+closed, although the server has already stopped allowing new sessions. See
+[`tls.Server.close()`][] for more details.
 
 #### server.setTimeout([msecs][, callback])
 <!-- YAML
@@ -1899,6 +1929,10 @@ error will be thrown.
 <!-- YAML
 added: v8.4.0
 changes:
+  - version: v12.4.0
+    pr-url: https://github.com/nodejs/node/pull/27782
+    description: The `options` parameter now supports `net.createServer()`
+                 options.
   - version: v8.9.3
     pr-url: https://github.com/nodejs/node/pull/17105
     description: Added the `maxOutstandingPings` option with a default limit of
@@ -1974,6 +2008,7 @@ changes:
     `Http2ServerResponse` class to use.
     Useful for extending the original `Http2ServerResponse`.
     **Default:** `Http2ServerResponse`.
+  * ...: Any [`net.createServer()`][] option can be provided.
 * `onRequestHandler` {Function} See [Compatibility API][]
 * Returns: {Http2Server}
 
@@ -2179,7 +2214,8 @@ changes:
     instance passed to `connect` and the `options` object, and returns any
     [`Duplex`][] stream that is to be used as the connection for this session.
   * ...: Any [`net.connect()`][] or [`tls.connect()`][] options can be provided.
-* `listener` {Function}
+* `listener` {Function} Will be registered as a one-time listener of the
+  [`'connect'`][] event.
 * Returns: {ClientHttp2Session}
 
 Returns a `ClientHttp2Session` instance.
@@ -2232,7 +2268,7 @@ Returns an object containing the default settings for an `Http2Session`
 instance. This method returns a new object instance every time it is called
 so instances returned may be safely modified for use.
 
-### http2.getPackedSettings(settings)
+### http2.getPackedSettings([settings])
 <!-- YAML
 added: v8.4.0
 -->
@@ -2432,7 +2468,7 @@ const client = http2.connect('http://localhost');
 
 client.on('stream', (pushedStream, requestHeaders) => {
   pushedStream.on('push', (responseHeaders) => {
-    // process response headers
+    // Process response headers
   });
   pushedStream.on('data', (chunk) => { /* handle pushed data */ });
 });
@@ -2744,7 +2780,7 @@ added: v8.4.0
 
 The raw request/response headers list exactly as they were received.
 
-Note that the keys and values are in the same list. It is *not* a
+The keys and values are in the same list. It is *not* a
 list of tuples. So, the even-numbered offsets are key values, and the
 odd-numbered offsets are the associated values.
 
@@ -3008,7 +3044,7 @@ added: v8.4.0
 * Returns: {string}
 
 Reads out a header that has already been queued but not sent to the client.
-Note that the name is case insensitive.
+The name is case-insensitive.
 
 ```js
 const contentType = response.getHeader('content-type');
@@ -3067,7 +3103,7 @@ added: v8.4.0
 * Returns: {boolean}
 
 Returns `true` if the header identified by `name` is currently set in the
-outgoing headers. Note that the header name matching is case-insensitive.
+outgoing headers. The header name matching is case-insensitive.
 
 ```js
 const hasContentType = response.hasHeader('content-type');
@@ -3251,7 +3287,7 @@ it will switch to implicit header mode and flush the implicit headers.
 This sends a chunk of the response body. This method may
 be called multiple times to provide successive parts of the body.
 
-Note that in the `http` module, the response body is omitted when the
+In the `http` module, the response body is omitted when the
 request is a HEAD request. Similarly, the `204` and `304` responses
 _must not_ include a message body.
 
@@ -3314,12 +3350,12 @@ response.writeHead(200, {
   'Content-Type': 'text/plain' });
 ```
 
-Note that Content-Length is given in bytes not characters. The
+`Content-Length` is given in bytes not characters. The
 `Buffer.byteLength()` API may be used to determine the number of bytes in a
 given encoding. On outbound messages, Node.js does not check if Content-Length
 and the length of the body being transmitted are equal or not. However, when
 receiving messages, Node.js will automatically reject messages when the
-Content-Length does not match the actual payload size.
+`Content-Length` does not match the actual payload size.
 
 This method may be called at most one time on a message before
 [`response.end()`][] is called.
@@ -3438,6 +3474,7 @@ following additional properties:
 [Stream]: stream.html#stream_stream
 [Using `options.selectPadding()`]: #http2_using_options_selectpadding
 [`'checkContinue'`]: #http2_event_checkcontinue
+[`'connect'`]: #http2_event_connect
 [`'request'`]: #http2_event_request
 [`'unknownProtocol'`]: #http2_event_unknownprotocol
 [`ClientHttp2Stream`]: #http2_class_clienthttp2stream
@@ -3453,6 +3490,7 @@ following additional properties:
 [`http2.createServer()`]: #http2_http2_createserver_options_onrequesthandler
 [`http2session.close()`]: #http2_http2session_close_callback
 [`http2stream.pushStream()`]: #http2_http2stream_pushstream_headers_options_callback
+[`net.createServer()`]: net.html#net_net_createserver_options_connectionlistener
 [`net.Server.close()`]: net.html#net_server_close_callback
 [`net.Socket.bufferSize`]: net.html#net_socket_buffersize
 [`net.Socket.prototype.ref()`]: net.html#net_socket_ref

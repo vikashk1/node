@@ -35,6 +35,8 @@ namespace crypto {
 class NodeBIO;
 }
 
+class CleanupHookCallback;
+
 /* Example:
  *
  * class ExampleRetainer : public MemoryRetainer {
@@ -88,9 +90,9 @@ class NodeBIO;
  *     NonPointerRetainerClass non_pointer_retainer;
  *     InternalClass internal_member_;
  *     std::vector<uv_async_t> vector_;
- *     node::Persistent<Object> target_;
+ *     v8::Global<Object> target_;
  *
- *     node::Persistent<Object> wrapped_;
+ *     v8::Global<Object> wrapped_;
  * }
  *
  * This creates the following graph:
@@ -107,7 +109,7 @@ class NodeBIO;
  */
 class MemoryRetainer {
  public:
-  virtual ~MemoryRetainer() {}
+  virtual ~MemoryRetainer() = default;
 
   // Subclasses should implement these methods to provide information
   // for the V8 heap snapshot generator.
@@ -179,9 +181,13 @@ class MemoryTracker {
   inline void TrackField(const char* edge_name,
                          const T& value,
                          const char* node_name = nullptr);
-  template <typename T, typename Traits>
+  template <typename T>
+  void TrackField(const char* edge_name,
+                  const v8::Eternal<T>& value,
+                  const char* node_name);
+  template <typename T>
   inline void TrackField(const char* edge_name,
-                         const v8::Persistent<T, Traits>& value,
+                         const v8::PersistentBase<T>& value,
                          const char* node_name = nullptr);
   template <typename T>
   inline void TrackField(const char* edge_name,
@@ -191,6 +197,13 @@ class MemoryTracker {
   inline void TrackField(const char* edge_name,
                          const MallocedBuffer<T>& value,
                          const char* node_name = nullptr);
+  // We do not implement CleanupHookCallback as MemoryRetainer
+  // but instead specialize the method here to avoid the cost of
+  // virtual pointers.
+  // TODO(joyeecheung): do this for BaseObject and remove WrappedObject()
+  void TrackField(const char* edge_name,
+                  const CleanupHookCallback& value,
+                  const char* node_name = nullptr);
   inline void TrackField(const char* edge_name,
                          const uv_buf_t& value,
                          const char* node_name = nullptr);
@@ -202,7 +215,7 @@ class MemoryTracker {
                          const char* node_name = nullptr);
   template <class NativeT, class V8T>
   inline void TrackField(const char* edge_name,
-                         const AliasedBuffer<NativeT, V8T>& value,
+                         const AliasedBufferBase<NativeT, V8T>& value,
                          const char* node_name = nullptr);
 
   // Put a memory container into the graph, create an edge from

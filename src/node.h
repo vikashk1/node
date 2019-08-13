@@ -24,9 +24,9 @@
 
 #ifdef _WIN32
 # ifndef BUILDING_NODE_EXTENSION
-#   define NODE_EXTERN __declspec(dllexport)
+#  define NODE_EXTERN __declspec(dllexport)
 # else
-#   define NODE_EXTERN __declspec(dllimport)
+#  define NODE_EXTERN __declspec(dllimport)
 # endif
 #else
 # define NODE_EXTERN __attribute__((visibility("default")))
@@ -43,7 +43,7 @@
 // See issue https://github.com/nodejs/node-v0.x-archive/issues/1236
 #if defined(__MINGW32__) || defined(_MSC_VER)
 #ifndef _WIN32_WINNT
-# define _WIN32_WINNT   0x0600  // Windows Server 2008
+# define _WIN32_WINNT 0x0600  // Windows Server 2008
 #endif
 
 #ifndef NOMINMAX
@@ -57,7 +57,7 @@
 #endif
 
 #ifdef _WIN32
-# define SIGKILL         9
+# define SIGKILL 9
 #endif
 
 #include "v8.h"  // NOLINT(build/include_order)
@@ -65,6 +65,12 @@
 #include "node_version.h"  // NODE_MODULE_VERSION
 
 #include <memory>
+
+// We cannot use __POSIX__ in this header because that's only defined when
+// building Node.js.
+#ifndef _WIN32
+#include <signal.h>
+#endif  // _WIN32
 
 #define NODE_MAKE_VERSION(major, minor, patch)                                \
   ((major) * 0x1000 + (minor) * 0x100 + (patch))
@@ -184,8 +190,8 @@ NODE_DEPRECATED("Use MakeCallback(..., async_context)",
 #include <cstdint>
 
 #ifndef NODE_STRINGIFY
-#define NODE_STRINGIFY(n) NODE_STRINGIFY_HELPER(n)
-#define NODE_STRINGIFY_HELPER(n) #n
+# define NODE_STRINGIFY(n) NODE_STRINGIFY_HELPER(n)
+# define NODE_STRINGIFY_HELPER(n) #n
 #endif
 
 #ifdef _WIN32
@@ -248,7 +254,7 @@ NODE_EXTERN void FreeArrayBufferAllocator(ArrayBufferAllocator* allocator);
 
 class NODE_EXTERN MultiIsolatePlatform : public v8::Platform {
  public:
-  ~MultiIsolatePlatform() override { }
+  ~MultiIsolatePlatform() override = default;
   // Returns true if work was dispatched or executed. New tasks that are
   // posted during flushing of the queue are postponed until the next
   // flushing.
@@ -311,6 +317,8 @@ NODE_EXTERN void FreeIsolateData(IsolateData* isolate_data);
 
 // TODO(addaleax): Add an official variant using STL containers, and move
 // per-Environment options parsing here.
+// Returns nullptr when the Environment cannot be created e.g. there are
+// pending JavaScript exceptions.
 NODE_EXTERN Environment* CreateEnvironment(IsolateData* isolate_data,
                                            v8::Local<v8::Context> context,
                                            int argc,
@@ -372,7 +380,7 @@ NODE_DEPRECATED("Use v8::Date::ValueOf() directly",
     (target)->DefineOwnProperty(context,                                      \
                                 constant_name,                                \
                                 constant_value,                               \
-                                constant_attributes).FromJust();              \
+                                constant_attributes).Check();                 \
   }                                                                           \
   while (0)
 
@@ -393,7 +401,7 @@ NODE_DEPRECATED("Use v8::Date::ValueOf() directly",
     (target)->DefineOwnProperty(context,                                      \
                                 constant_name,                                \
                                 constant_value,                               \
-                                constant_attributes).FromJust();              \
+                                constant_attributes).Check();                 \
   }                                                                           \
   while (0)
 
@@ -424,7 +432,7 @@ inline void NODE_SET_METHOD(v8::Local<v8::Object> recv,
   v8::Local<v8::String> fn_name = v8::String::NewFromUtf8(isolate, name,
       v8::NewStringType::kInternalized).ToLocalChecked();
   fn->SetName(fn_name);
-  recv->Set(context, fn_name, fn).FromJust();
+  recv->Set(context, fn_name, fn).Check();
 }
 #define NODE_SET_METHOD node::NODE_SET_METHOD
 
@@ -683,8 +691,15 @@ NODE_EXTERN async_context EmitAsyncInit(v8::Isolate* isolate,
                                         v8::Local<v8::String> name,
                                         async_id trigger_async_id = -1);
 
-/* Emit the destroy() callback. */
+/* Emit the destroy() callback. The overload taking an `Environment*` argument
+ * should be used when the Isolate’s current Context is not associated with
+ * a Node.js Environment, or when there is no current Context, for example
+ * when calling this function during garbage collection. In that case, the
+ * `Environment*` value should have been acquired previously, e.g. through
+ * `GetCurrentEnvironment()`. */
 NODE_EXTERN void EmitAsyncDestroy(v8::Isolate* isolate,
+                                  async_context asyncContext);
+NODE_EXTERN void EmitAsyncDestroy(Environment* env,
                                   async_context asyncContext);
 
 class InternalCallbackScope;
@@ -756,76 +771,63 @@ v8::MaybeLocal<v8::Value> MakeCallback(v8::Isolate* isolate,
 /* Helper class users can optionally inherit from. If
  * `AsyncResource::MakeCallback()` is used, then all four callbacks will be
  * called automatically. */
-class AsyncResource {
+class NODE_EXTERN AsyncResource {
  public:
   AsyncResource(v8::Isolate* isolate,
                 v8::Local<v8::Object> resource,
                 const char* name,
-                async_id trigger_async_id = -1)
-      : isolate_(isolate),
-        resource_(isolate, resource) {
-    async_context_ = EmitAsyncInit(isolate, resource, name,
-                                   trigger_async_id);
-  }
+                async_id trigger_async_id = -1);
 
-  virtual ~AsyncResource() {
-    EmitAsyncDestroy(isolate_, async_context_);
-    resource_.Reset();
-  }
+  virtual ~AsyncResource();
+
+  AsyncResource(const AsyncResource&) = delete;
+  void operator=(const AsyncResource&) = delete;
 
   v8::MaybeLocal<v8::Value> MakeCallback(
       v8::Local<v8::Function> callback,
       int argc,
-      v8::Local<v8::Value>* argv) {
-    return node::MakeCallback(isolate_, get_resource(),
-                              callback, argc, argv,
-                              async_context_);
-  }
+      v8::Local<v8::Value>* argv);
 
   v8::MaybeLocal<v8::Value> MakeCallback(
       const char* method,
       int argc,
-      v8::Local<v8::Value>* argv) {
-    return node::MakeCallback(isolate_, get_resource(),
-                              method, argc, argv,
-                              async_context_);
-  }
+      v8::Local<v8::Value>* argv);
 
   v8::MaybeLocal<v8::Value> MakeCallback(
       v8::Local<v8::String> symbol,
       int argc,
-      v8::Local<v8::Value>* argv) {
-    return node::MakeCallback(isolate_, get_resource(),
-                              symbol, argc, argv,
-                              async_context_);
-  }
+      v8::Local<v8::Value>* argv);
 
-  v8::Local<v8::Object> get_resource() {
-    return resource_.Get(isolate_);
-  }
-
-  async_id get_async_id() const {
-    return async_context_.async_id;
-  }
-
-  async_id get_trigger_async_id() const {
-    return async_context_.trigger_async_id;
-  }
+  v8::Local<v8::Object> get_resource();
+  async_id get_async_id() const;
+  async_id get_trigger_async_id() const;
 
  protected:
-  class CallbackScope : public node::CallbackScope {
+  class NODE_EXTERN CallbackScope : public node::CallbackScope {
    public:
-    explicit CallbackScope(AsyncResource* res)
-      : node::CallbackScope(res->isolate_,
-                            res->resource_.Get(res->isolate_),
-                            res->async_context_) {}
+    explicit CallbackScope(AsyncResource* res);
   };
 
  private:
-  v8::Isolate* isolate_;
+  Environment* env_;
   v8::Persistent<v8::Object> resource_;
   async_context async_context_;
 };
+
+#ifndef _WIN32
+// Register a signal handler without interrupting any handlers that node
+// itself needs. This does override handlers registered through
+// process.on('SIG...', function() { ... }). The `reset_handler` flag indicates
+// whether the signal handler for the given signal should be reset to its
+// default value before executing the handler (i.e. it works like SA_RESETHAND).
+// The `reset_handler` flag is invalid when `signal` is SIGSEGV.
+NODE_EXTERN
+void RegisterSignalHandler(int signal,
+                           void (*handler)(int signal,
+                                           siginfo_t* info,
+                                           void* ucontext),
+                           bool reset_handler = false);
+#endif  // _WIN32
 
 }  // namespace node
 

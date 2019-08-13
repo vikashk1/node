@@ -6,13 +6,18 @@
 #ifdef NODE_REPORT
 #include "node_report.h"
 #endif
+#include "node_process.h"
+#include "node_v8_platform-inl.h"
+#include "util-inl.h"
 
 namespace node {
 
 using errors::TryCatchScope;
+using v8::Boolean;
 using v8::Context;
 using v8::Exception;
 using v8::Function;
+using v8::FunctionCallbackInfo;
 using v8::HandleScope;
 using v8::Int32;
 using v8::Isolate;
@@ -21,10 +26,11 @@ using v8::Local;
 using v8::Maybe;
 using v8::MaybeLocal;
 using v8::Message;
-using v8::NewStringType;
 using v8::Number;
 using v8::Object;
 using v8::ScriptOrigin;
+using v8::StackFrame;
+using v8::StackTrace;
 using v8::String;
 using v8::Undefined;
 using v8::Value;
@@ -44,30 +50,20 @@ namespace per_process {
 static Mutex tty_mutex;
 }  // namespace per_process
 
-void AppendExceptionLine(Environment* env,
-                         Local<Value> er,
-                         Local<Message> message,
-                         enum ErrorHandlingMode mode) {
-  if (message.IsEmpty()) return;
+static const int kMaxErrorSourceLength = 1024;
 
-  HandleScope scope(env->isolate());
-  Local<Object> err_obj;
-  if (!er.IsEmpty() && er->IsObject()) {
-    err_obj = er.As<Object>();
+static std::string GetErrorSource(Isolate* isolate,
+                                  Local<Context> context,
+                                  Local<Message> message,
+                                  bool* added_exception_line) {
+  MaybeLocal<String> source_line_maybe = message->GetSourceLine(context);
+  node::Utf8Value encoded_source(isolate, source_line_maybe.ToLocalChecked());
+  std::string sourceline(*encoded_source, encoded_source.length());
+
+  if (sourceline.find("node-do-not-add-exception-line") != std::string::npos) {
+    *added_exception_line = false;
+    return sourceline;
   }
-
-  // Print (filename):(line number): (message).
-  ScriptOrigin origin = message->GetScriptOrigin();
-  node::Utf8Value filename(env->isolate(), message->GetScriptResourceName());
-  const char* filename_string = *filename;
-  int linenum = message->GetLineNumber(env->context()).FromJust();
-  // Print line of source code.
-  MaybeLocal<String> source_line_maybe = message->GetSourceLine(env->context());
-  node::Utf8Value sourceline(env->isolate(),
-                             source_line_maybe.ToLocalChecked());
-  const char* sourceline_string = *sourceline;
-  if (strstr(sourceline_string, "node-do-not-add-exception-line") != nullptr)
-    return;
 
   // Because of how node modules work, all scripts are wrapped with a
   // "function (module, exports, __filename, ...) {"
@@ -90,26 +86,32 @@ void AppendExceptionLine(Environment* env,
   // sourceline to 78 characters, and we end up not providing very much
   // useful debugging info to the user if we remove 62 characters.
 
+  // Print (filename):(line number): (message).
+  ScriptOrigin origin = message->GetScriptOrigin();
+  node::Utf8Value filename(isolate, message->GetScriptResourceName());
+  const char* filename_string = *filename;
+  int linenum = message->GetLineNumber(context).FromJust();
+
   int script_start = (linenum - origin.ResourceLineOffset()->Value()) == 1
                          ? origin.ResourceColumnOffset()->Value()
                          : 0;
-  int start = message->GetStartColumn(env->context()).FromMaybe(0);
-  int end = message->GetEndColumn(env->context()).FromMaybe(0);
+  int start = message->GetStartColumn(context).FromMaybe(0);
+  int end = message->GetEndColumn(context).FromMaybe(0);
   if (start >= script_start) {
     CHECK_GE(end, start);
     start -= script_start;
     end -= script_start;
   }
 
-  char arrow[1024];
-  int max_off = sizeof(arrow) - 2;
+  int max_off = kMaxErrorSourceLength - 2;
 
-  int off = snprintf(arrow,
-                     sizeof(arrow),
+  char buf[kMaxErrorSourceLength];
+  int off = snprintf(buf,
+                     kMaxErrorSourceLength,
                      "%s:%i\n%s\n",
                      filename_string,
                      linenum,
-                     sourceline_string);
+                     sourceline.c_str());
   CHECK_GE(off, 0);
   if (off > max_off) {
     off = max_off;
@@ -117,26 +119,105 @@ void AppendExceptionLine(Environment* env,
 
   // Print wavy underline (GetUnderline is deprecated).
   for (int i = 0; i < start; i++) {
-    if (sourceline_string[i] == '\0' || off >= max_off) {
+    if (sourceline[i] == '\0' || off >= max_off) {
       break;
     }
     CHECK_LT(off, max_off);
-    arrow[off++] = (sourceline_string[i] == '\t') ? '\t' : ' ';
+    buf[off++] = (sourceline[i] == '\t') ? '\t' : ' ';
   }
   for (int i = start; i < end; i++) {
-    if (sourceline_string[i] == '\0' || off >= max_off) {
+    if (sourceline[i] == '\0' || off >= max_off) {
       break;
     }
     CHECK_LT(off, max_off);
-    arrow[off++] = '^';
+    buf[off++] = '^';
   }
   CHECK_LE(off, max_off);
-  arrow[off] = '\n';
-  arrow[off + 1] = '\0';
+  buf[off] = '\n';
+  buf[off + 1] = '\0';
 
-  Local<String> arrow_str =
-      String::NewFromUtf8(env->isolate(), arrow, NewStringType::kNormal)
-          .ToLocalChecked();
+  *added_exception_line = true;
+  return std::string(buf);
+}
+
+void PrintStackTrace(Isolate* isolate, Local<StackTrace> stack) {
+  for (int i = 0; i < stack->GetFrameCount() - 1; i++) {
+    Local<StackFrame> stack_frame = stack->GetFrame(isolate, i);
+    node::Utf8Value fn_name_s(isolate, stack_frame->GetFunctionName());
+    node::Utf8Value script_name(isolate, stack_frame->GetScriptName());
+    const int line_number = stack_frame->GetLineNumber();
+    const int column = stack_frame->GetColumn();
+
+    if (stack_frame->IsEval()) {
+      if (stack_frame->GetScriptId() == Message::kNoScriptIdInfo) {
+        fprintf(stderr, "    at [eval]:%i:%i\n", line_number, column);
+      } else {
+        fprintf(stderr,
+                "    at [eval] (%s:%i:%i)\n",
+                *script_name,
+                line_number,
+                column);
+      }
+      break;
+    }
+
+    if (fn_name_s.length() == 0) {
+      fprintf(stderr, "    at %s:%i:%i\n", *script_name, line_number, column);
+    } else {
+      fprintf(stderr,
+              "    at %s (%s:%i:%i)\n",
+              *fn_name_s,
+              *script_name,
+              line_number,
+              column);
+    }
+  }
+  fflush(stderr);
+}
+
+void PrintException(Isolate* isolate,
+                    Local<Context> context,
+                    Local<Value> err,
+                    Local<Message> message) {
+  node::Utf8Value reason(isolate,
+                         err->ToDetailString(context)
+                             .FromMaybe(Local<String>()));
+  bool added_exception_line = false;
+  std::string source =
+      GetErrorSource(isolate, context, message, &added_exception_line);
+  fprintf(stderr, "%s\n", source.c_str());
+  fprintf(stderr, "%s\n", *reason);
+
+  Local<v8::StackTrace> stack = message->GetStackTrace();
+  if (!stack.IsEmpty()) PrintStackTrace(isolate, stack);
+}
+
+void PrintCaughtException(Isolate* isolate,
+                          Local<Context> context,
+                          const v8::TryCatch& try_catch) {
+  CHECK(try_catch.HasCaught());
+  PrintException(isolate, context, try_catch.Exception(), try_catch.Message());
+}
+
+void AppendExceptionLine(Environment* env,
+                         Local<Value> er,
+                         Local<Message> message,
+                         enum ErrorHandlingMode mode) {
+  if (message.IsEmpty()) return;
+
+  HandleScope scope(env->isolate());
+  Local<Object> err_obj;
+  if (!er.IsEmpty() && er->IsObject()) {
+    err_obj = er.As<Object>();
+  }
+
+  bool added_exception_line = false;
+  std::string source = GetErrorSource(
+      env->isolate(), env->context(), message, &added_exception_line);
+  if (!added_exception_line) {
+    return;
+  }
+  MaybeLocal<Value> arrow_str = ToV8Value(env->context(), source);
 
   const bool can_set_arrow = !arrow_str.IsEmpty() && !err_obj.IsEmpty();
   // If allocating arrow_str failed, print it out. There's not much else to do.
@@ -149,14 +230,15 @@ void AppendExceptionLine(Environment* env,
     Mutex::ScopedLock lock(per_process::tty_mutex);
     env->set_printed_error(true);
 
-    uv_tty_reset_mode();
-    PrintErrorString("\n%s", arrow);
+    ResetStdio();
+    PrintErrorString("\n%s", source.c_str());
     return;
   }
 
   CHECK(err_obj
-            ->SetPrivate(
-                env->context(), env->arrow_message_private_symbol(), arrow_str)
+            ->SetPrivate(env->context(),
+                         env->arrow_message_private_symbol(),
+                         arrow_str.ToLocalChecked())
             .FromMaybe(false));
 }
 
@@ -182,38 +264,82 @@ void AppendExceptionLine(Environment* env,
   Abort();
 }
 
-void ReportException(Environment* env,
-                     Local<Value> er,
-                     Local<Message> message) {
-  CHECK(!er.IsEmpty());
-  HandleScope scope(env->isolate());
+enum class EnhanceFatalException { kEnhance, kDontEnhance };
 
-  if (message.IsEmpty()) message = Exception::CreateMessage(env->isolate(), er);
+/**
+ * Report the exception to the inspector, then print it to stderr.
+ * This should only be used when the Node.js instance is about to exit
+ * (i.e. this should be followed by a env->Exit() or an Abort()).
+ *
+ * Use enhance_stack = EnhanceFatalException::kDontEnhance
+ * when it's unsafe to call into JavaScript.
+ */
+static void ReportFatalException(Environment* env,
+                                 Local<Value> error,
+                                 Local<Message> message,
+                                 EnhanceFatalException enhance_stack) {
+  Isolate* isolate = env->isolate();
+  CHECK(!error.IsEmpty());
+  CHECK(!message.IsEmpty());
+  HandleScope scope(isolate);
 
-  AppendExceptionLine(env, er, message, FATAL_ERROR);
+  AppendExceptionLine(env, error, message, FATAL_ERROR);
 
-  Local<Value> trace_value;
+  auto report_to_inspector = [&]() {
+#if HAVE_INSPECTOR
+    env->inspector_agent()->ReportUncaughtException(error, message);
+#endif
+  };
+
   Local<Value> arrow;
-  const bool decorated = IsExceptionDecorated(env, er);
+  Local<Value> stack_trace;
+  bool decorated = IsExceptionDecorated(env, error);
 
-  if (er->IsUndefined() || er->IsNull()) {
-    trace_value = Undefined(env->isolate());
+  if (!error->IsObject()) {  // We can only enhance actual errors.
+    report_to_inspector();
+    stack_trace = Undefined(isolate);
+    // If error is not an object, AppendExceptionLine() has already print the
+    // source line and the arrow to stderr.
+    // TODO(joyeecheung): move that side effect out of AppendExceptionLine().
+    // It is done just to preserve the source line as soon as possible.
   } else {
-    Local<Object> err_obj = er->ToObject(env->context()).ToLocalChecked();
+    Local<Object> err_obj = error.As<Object>();
 
-    if (!err_obj->Get(env->context(), env->stack_string())
-             .ToLocal(&trace_value)) {
-      trace_value = Undefined(env->isolate());
+    auto enhance_with = [&](Local<Function> enhancer) {
+      Local<Value> enhanced;
+      Local<Value> argv[] = {err_obj};
+      if (!enhancer.IsEmpty() &&
+          enhancer
+              ->Call(env->context(), Undefined(isolate), arraysize(argv), argv)
+              .ToLocal(&enhanced)) {
+        stack_trace = enhanced;
+      }
+    };
+
+    switch (enhance_stack) {
+      case EnhanceFatalException::kEnhance: {
+        enhance_with(env->enhance_fatal_stack_before_inspector());
+        report_to_inspector();
+        enhance_with(env->enhance_fatal_stack_after_inspector());
+        break;
+      }
+      case EnhanceFatalException::kDontEnhance: {
+        report_to_inspector();
+        break;
+      }
+      default:
+        UNREACHABLE();
     }
+
     arrow =
         err_obj->GetPrivate(env->context(), env->arrow_message_private_symbol())
             .ToLocalChecked();
   }
 
-  node::Utf8Value trace(env->isolate(), trace_value);
+  node::Utf8Value trace(env->isolate(), stack_trace);
 
   // range errors have a trace member set to undefined
-  if (trace.length() > 0 && !trace_value->IsUndefined()) {
+  if (trace.length() > 0 && !stack_trace->IsUndefined()) {
     if (arrow.IsEmpty() || !arrow->IsString() || decorated) {
       PrintErrorString("%s\n", *trace);
     } else {
@@ -227,8 +353,8 @@ void ReportException(Environment* env,
     MaybeLocal<Value> message;
     MaybeLocal<Value> name;
 
-    if (er->IsObject()) {
-      Local<Object> err_obj = er.As<Object>();
+    if (error->IsObject()) {
+      Local<Object> err_obj = error.As<Object>();
       message = err_obj->Get(env->context(), env->message_string());
       name = err_obj->Get(env->context(), env->name_string());
     }
@@ -236,7 +362,7 @@ void ReportException(Environment* env,
     if (message.IsEmpty() || message.ToLocalChecked()->IsUndefined() ||
         name.IsEmpty() || name.ToLocalChecked()->IsUndefined()) {
       // Not an error object. Just print as-is.
-      String::Utf8Value message(env->isolate(), er);
+      String::Utf8Value message(env->isolate(), error);
 
       PrintErrorString("%s\n",
                        *message ? *message : "<toString() threw exception>");
@@ -255,14 +381,6 @@ void ReportException(Environment* env,
   }
 
   fflush(stderr);
-
-#if HAVE_INSPECTOR
-  env->inspector_agent()->FatalException(er, message);
-#endif
-}
-
-void ReportException(Environment* env, const v8::TryCatch& try_catch) {
-  ReportException(env, try_catch.Exception(), try_catch.Message());
 }
 
 void PrintErrorString(const char* format, ...) {
@@ -328,7 +446,13 @@ namespace errors {
 TryCatchScope::~TryCatchScope() {
   if (HasCaught() && !HasTerminated() && mode_ == CatchMode::kFatal) {
     HandleScope scope(env_->isolate());
-    ReportException(env_, Exception(), Message());
+    Local<v8::Value> exception = Exception();
+    Local<v8::Message> message = Message();
+    EnhanceFatalException enhance = CanContinue() ?
+        EnhanceFatalException::kEnhance : EnhanceFatalException::kDontEnhance;
+    if (message.IsEmpty())
+      message = Exception::CreateMessage(env_->isolate(), exception);
+    ReportFatalException(env_, exception, message, enhance);
     env_->Exit(7);
   }
 }
@@ -661,7 +785,83 @@ const char* errno_string(int errorno) {
   }
 }
 
-}  // namespace errors
+void PerIsolateMessageListener(Local<Message> message, Local<Value> error) {
+  Isolate* isolate = message->GetIsolate();
+  switch (message->ErrorLevel()) {
+    case Isolate::MessageErrorLevel::kMessageWarning: {
+      Environment* env = Environment::GetCurrent(isolate);
+      if (!env) {
+        break;
+      }
+      Utf8Value filename(isolate, message->GetScriptOrigin().ResourceName());
+      // (filename):(line) (message)
+      std::stringstream warning;
+      warning << *filename;
+      warning << ":";
+      warning << message->GetLineNumber(env->context()).FromMaybe(-1);
+      warning << " ";
+      v8::String::Utf8Value msg(isolate, message->Get());
+      warning << *msg;
+      USE(ProcessEmitWarningGeneric(env, warning.str().c_str(), "V8"));
+      break;
+    }
+    case Isolate::MessageErrorLevel::kMessageError:
+      TriggerUncaughtException(isolate, error, message);
+      break;
+  }
+}
+
+void SetPrepareStackTraceCallback(const FunctionCallbackInfo<Value>& args) {
+  Environment* env = Environment::GetCurrent(args);
+  CHECK(args[0]->IsFunction());
+  env->set_prepare_stack_trace_callback(args[0].As<Function>());
+}
+
+static void SetEnhanceStackForFatalException(
+    const FunctionCallbackInfo<Value>& args) {
+  Environment* env = Environment::GetCurrent(args);
+  CHECK(args[0]->IsFunction());
+  CHECK(args[1]->IsFunction());
+  env->set_enhance_fatal_stack_before_inspector(args[0].As<Function>());
+  env->set_enhance_fatal_stack_after_inspector(args[1].As<Function>());
+}
+
+// Side effect-free stringification that will never throw exceptions.
+static void NoSideEffectsToString(const FunctionCallbackInfo<Value>& args) {
+  Local<Context> context = args.GetIsolate()->GetCurrentContext();
+  Local<String> detail_string;
+  if (args[0]->ToDetailString(context).ToLocal(&detail_string))
+    args.GetReturnValue().Set(detail_string);
+}
+
+static void TriggerUncaughtException(const FunctionCallbackInfo<Value>& args) {
+  Isolate* isolate = args.GetIsolate();
+  Environment* env = Environment::GetCurrent(isolate);
+  Local<Value> exception = args[0];
+  Local<Message> message = Exception::CreateMessage(isolate, exception);
+  if (env != nullptr && env->abort_on_uncaught_exception()) {
+    ReportFatalException(
+        env, exception, message, EnhanceFatalException::kEnhance);
+    Abort();
+  }
+  bool from_promise = args[1]->IsTrue();
+  errors::TriggerUncaughtException(isolate, exception, message, from_promise);
+}
+
+void Initialize(Local<Object> target,
+                Local<Value> unused,
+                Local<Context> context,
+                void* priv) {
+  Environment* env = Environment::GetCurrent(context);
+  env->SetMethod(
+      target, "setPrepareStackTraceCallback", SetPrepareStackTraceCallback);
+  env->SetMethod(target,
+                 "setEnhanceStackForFatalException",
+                 SetEnhanceStackForFatalException);
+  env->SetMethodNoSideEffect(
+      target, "noSideEffectsToString", NoSideEffectsToString);
+  env->SetMethod(target, "triggerUncaughtException", TriggerUncaughtException);
+}
 
 void DecorateErrorStack(Environment* env,
                         const errors::TryCatchScope& try_catch) {
@@ -699,56 +899,121 @@ void DecorateErrorStack(Environment* env,
       env->context(), env->decorated_private_symbol(), True(env->isolate()));
 }
 
-void FatalException(Isolate* isolate,
-                    Local<Value> error,
-                    Local<Message> message) {
+void TriggerUncaughtException(Isolate* isolate,
+                              Local<Value> error,
+                              Local<Message> message,
+                              bool from_promise) {
   CHECK(!error.IsEmpty());
   HandleScope scope(isolate);
 
-  Environment* env = Environment::GetCurrent(isolate);
-  CHECK_NOT_NULL(env);  // TODO(addaleax): Handle nullptr here.
+  if (message.IsEmpty()) message = Exception::CreateMessage(isolate, error);
+
+  CHECK(isolate->InContext());
+  Local<Context> context = isolate->GetCurrentContext();
+  Environment* env = Environment::GetCurrent(context);
+  if (env == nullptr) {
+    // This means that the exception happens before Environment is assigned
+    // to the context e.g. when there is a SyntaxError in a per-context
+    // script - which usually indicates that there is a bug because no JS
+    // error is supposed to be thrown at this point.
+    // Since we don't have access to Environment here, there is not
+    // much we can do, so we just print whatever is useful and crash.
+    PrintException(isolate, context, error, message);
+    Abort();
+  }
+
+  // Invoke process._fatalException() to give user a chance to handle it.
+  // We have to grab it from the process object since this has been
+  // monkey-patchable.
   Local<Object> process_object = env->process_object();
   Local<String> fatal_exception_string = env->fatal_exception_string();
   Local<Value> fatal_exception_function =
       process_object->Get(env->context(),
                           fatal_exception_string).ToLocalChecked();
-
+  // If the exception happens before process._fatalException is attached
+  // during bootstrap, or if the user has patched it incorrectly, exit
+  // the current Node.js instance.
   if (!fatal_exception_function->IsFunction()) {
-    // Failed before the process._fatalException function was added!
-    // this is probably pretty bad.  Nothing to do but report and exit.
-    ReportException(env, error, message);
+    ReportFatalException(
+        env, error, message, EnhanceFatalException::kDontEnhance);
     env->Exit(6);
+    return;
+  }
+
+  MaybeLocal<Value> handled;
+  {
+    // We do not expect the global uncaught exception itself to throw any more
+    // exceptions. If it does, exit the current Node.js instance.
+    errors::TryCatchScope try_catch(env,
+                                    errors::TryCatchScope::CatchMode::kFatal);
+    // Explicitly disable verbose exception reporting -
+    // if process._fatalException() throws an error, we don't want it to
+    // trigger the per-isolate message listener which will call this
+    // function and recurse.
+    try_catch.SetVerbose(false);
+    Local<Value> argv[2] = { error,
+                             Boolean::New(env->isolate(), from_promise) };
+
+    handled = fatal_exception_function.As<Function>()->Call(
+        env->context(), process_object, arraysize(argv), argv);
+  }
+
+  // If process._fatalException() throws, we are now exiting the Node.js
+  // instance so return to continue the exit routine.
+  // TODO(joyeecheung): return a Maybe here to prevent the caller from
+  // stepping on the exit.
+  if (handled.IsEmpty()) {
+    return;
+  }
+
+  // The global uncaught exception handler returns true if the user handles it
+  // by e.g. listening to `uncaughtException`. In that case, continue program
+  // execution.
+  // TODO(joyeecheung): This has been only checking that the return value is
+  // exactly false. Investigate whether this can be turned to an "if true"
+  // similar to how the worker global uncaught exception handler handles it.
+  if (!handled.ToLocalChecked()->IsFalse()) {
+    return;
+  }
+
+  // Now we are certain that the exception is fatal.
+  ReportFatalException(env, error, message, EnhanceFatalException::kEnhance);
+
+  // If the global uncaught exception handler sets process.exitCode,
+  // exit with that code. Otherwise, exit with 1.
+  Local<String> exit_code = env->exit_code_string();
+  Local<Value> code;
+  if (process_object->Get(env->context(), exit_code).ToLocal(&code) &&
+      code->IsInt32()) {
+    env->Exit(code.As<Int32>()->Value());
   } else {
-    errors::TryCatchScope fatal_try_catch(env);
-
-    // Do not call FatalException when _fatalException handler throws
-    fatal_try_catch.SetVerbose(false);
-
-    // This will return true if the JS layer handled it, false otherwise
-    MaybeLocal<Value> caught = fatal_exception_function.As<Function>()->Call(
-        env->context(), process_object, 1, &error);
-
-    if (fatal_try_catch.HasTerminated()) return;
-
-    if (fatal_try_catch.HasCaught()) {
-      // The fatal exception function threw, so we must exit
-      ReportException(env, fatal_try_catch);
-      env->Exit(7);
-
-    } else if (caught.ToLocalChecked()->IsFalse()) {
-      ReportException(env, error, message);
-
-      // fatal_exception_function call before may have set a new exit code ->
-      // read it again, otherwise use default for uncaughtException 1
-      Local<String> exit_code = env->exit_code_string();
-      Local<Value> code;
-      if (!process_object->Get(env->context(), exit_code).ToLocal(&code) ||
-          !code->IsInt32()) {
-        env->Exit(1);
-      }
-      env->Exit(code.As<Int32>()->Value());
-    }
+    env->Exit(1);
   }
 }
 
+void TriggerUncaughtException(Isolate* isolate, const v8::TryCatch& try_catch) {
+  // If the try_catch is verbose, the per-isolate message listener is going to
+  // handle it (which is going to call into another overload of
+  // TriggerUncaughtException()).
+  if (try_catch.IsVerbose()) {
+    return;
+  }
+
+  // If the user calls TryCatch::TerminateExecution() on this TryCatch
+  // they must call CancelTerminateExecution() again before invoking
+  // TriggerUncaughtException() because it will invoke
+  // process._fatalException() in the JS land.
+  CHECK(!try_catch.HasTerminated());
+  CHECK(try_catch.HasCaught());
+  HandleScope scope(isolate);
+  TriggerUncaughtException(isolate,
+                           try_catch.Exception(),
+                           try_catch.Message(),
+                           false /* from_promise */);
+}
+
+}  // namespace errors
+
 }  // namespace node
+
+NODE_MODULE_CONTEXT_AWARE_INTERNAL(errors, node::errors::Initialize)

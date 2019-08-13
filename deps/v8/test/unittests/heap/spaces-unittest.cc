@@ -2,16 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "src/execution/isolate.h"
 #include "src/heap/heap-inl.h"
 #include "src/heap/heap-write-barrier-inl.h"
 #include "src/heap/spaces-inl.h"
-#include "src/isolate.h"
 #include "test/unittests/test-utils.h"
 
 namespace v8 {
 namespace internal {
 
-typedef TestWithIsolate SpacesTest;
+using SpacesTest = TestWithIsolate;
 
 TEST_F(SpacesTest, CompactionSpaceMerge) {
   Heap* heap = i_isolate()->heap();
@@ -39,7 +39,7 @@ TEST_F(SpacesTest, CompactionSpaceMerge) {
     HeapObject object =
         compaction_space->AllocateRawUnaligned(kMaxRegularHeapObjectSize)
             .ToObjectChecked();
-    heap->CreateFillerObjectAt(object->address(), kMaxRegularHeapObjectSize,
+    heap->CreateFillerObjectAt(object.address(), kMaxRegularHeapObjectSize,
                                ClearRecordedSlots::kNo);
   }
   int pages_in_old_space = old_space->CountTotalPages();
@@ -84,38 +84,38 @@ TEST_F(SpacesTest, WriteBarrierIsMarking) {
   EXPECT_FALSE(slim_chunk->IsMarking());
 }
 
-TEST_F(SpacesTest, WriteBarrierInNewSpaceToSpace) {
+TEST_F(SpacesTest, WriteBarrierInYoungGenerationToSpace) {
   const size_t kSizeOfMemoryChunk = sizeof(MemoryChunk);
   char memory[kSizeOfMemoryChunk];
   memset(&memory, 0, kSizeOfMemoryChunk);
   MemoryChunk* chunk = reinterpret_cast<MemoryChunk*>(&memory);
   heap_internals::MemoryChunk* slim_chunk =
       reinterpret_cast<heap_internals::MemoryChunk*>(&memory);
-  EXPECT_FALSE(chunk->InNewSpace());
-  EXPECT_FALSE(slim_chunk->InNewSpace());
-  chunk->SetFlag(MemoryChunk::IN_TO_SPACE);
-  EXPECT_TRUE(chunk->InNewSpace());
-  EXPECT_TRUE(slim_chunk->InNewSpace());
-  chunk->ClearFlag(MemoryChunk::IN_TO_SPACE);
-  EXPECT_FALSE(chunk->InNewSpace());
-  EXPECT_FALSE(slim_chunk->InNewSpace());
+  EXPECT_FALSE(chunk->InYoungGeneration());
+  EXPECT_FALSE(slim_chunk->InYoungGeneration());
+  chunk->SetFlag(MemoryChunk::TO_PAGE);
+  EXPECT_TRUE(chunk->InYoungGeneration());
+  EXPECT_TRUE(slim_chunk->InYoungGeneration());
+  chunk->ClearFlag(MemoryChunk::TO_PAGE);
+  EXPECT_FALSE(chunk->InYoungGeneration());
+  EXPECT_FALSE(slim_chunk->InYoungGeneration());
 }
 
-TEST_F(SpacesTest, WriteBarrierInNewSpaceFromSpace) {
+TEST_F(SpacesTest, WriteBarrierInYoungGenerationFromSpace) {
   const size_t kSizeOfMemoryChunk = sizeof(MemoryChunk);
   char memory[kSizeOfMemoryChunk];
   memset(&memory, 0, kSizeOfMemoryChunk);
   MemoryChunk* chunk = reinterpret_cast<MemoryChunk*>(&memory);
   heap_internals::MemoryChunk* slim_chunk =
       reinterpret_cast<heap_internals::MemoryChunk*>(&memory);
-  EXPECT_FALSE(chunk->InNewSpace());
-  EXPECT_FALSE(slim_chunk->InNewSpace());
-  chunk->SetFlag(MemoryChunk::IN_FROM_SPACE);
-  EXPECT_TRUE(chunk->InNewSpace());
-  EXPECT_TRUE(slim_chunk->InNewSpace());
-  chunk->ClearFlag(MemoryChunk::IN_FROM_SPACE);
-  EXPECT_FALSE(chunk->InNewSpace());
-  EXPECT_FALSE(slim_chunk->InNewSpace());
+  EXPECT_FALSE(chunk->InYoungGeneration());
+  EXPECT_FALSE(slim_chunk->InYoungGeneration());
+  chunk->SetFlag(MemoryChunk::FROM_PAGE);
+  EXPECT_TRUE(chunk->InYoungGeneration());
+  EXPECT_TRUE(slim_chunk->InYoungGeneration());
+  chunk->ClearFlag(MemoryChunk::FROM_PAGE);
+  EXPECT_FALSE(chunk->InYoungGeneration());
+  EXPECT_FALSE(slim_chunk->InYoungGeneration());
 }
 
 TEST_F(SpacesTest, CodeRangeAddressReuse) {

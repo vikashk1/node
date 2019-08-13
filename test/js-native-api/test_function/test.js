@@ -35,3 +35,10 @@ let tracked_function = test_function.MakeTrackedFunction(common.mustCall());
 assert(!!tracked_function);
 tracked_function = null;
 global.gc();
+
+assert.deepStrictEqual(test_function.TestCreateFunctionParameters(), {
+  envIsNull: 'Invalid argument',
+  nameIsNull: 'napi_ok',
+  cbIsNull: 'Invalid argument',
+  resultIsNull: 'Invalid argument'
+});

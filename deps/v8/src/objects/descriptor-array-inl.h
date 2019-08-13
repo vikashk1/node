@@ -7,15 +7,16 @@
 
 #include "src/objects/descriptor-array.h"
 
-#include "src/field-type.h"
+#include "src/execution/isolate.h"
+#include "src/handles/maybe-handles-inl.h"
 #include "src/heap/heap-write-barrier.h"
 #include "src/heap/heap.h"
-#include "src/isolate.h"
-#include "src/lookup-cache.h"
+#include "src/objects/field-type.h"
 #include "src/objects/heap-object-inl.h"
-#include "src/objects/maybe-object.h"
+#include "src/objects/lookup-cache-inl.h"
+#include "src/objects/maybe-object-inl.h"
+#include "src/objects/property.h"
 #include "src/objects/struct-inl.h"
-#include "src/property.h"
 
 // Has to be the last include (doesn't have include guards):
 #include "src/objects/object-macros.h"
@@ -24,10 +25,13 @@ namespace v8 {
 namespace internal {
 
 OBJECT_CONSTRUCTORS_IMPL(DescriptorArray, HeapObject)
-OBJECT_CONSTRUCTORS_IMPL(EnumCache, Tuple2)
+OBJECT_CONSTRUCTORS_IMPL(EnumCache, Struct)
 
 CAST_ACCESSOR(DescriptorArray)
 CAST_ACCESSOR(EnumCache)
+
+ACCESSORS(EnumCache, keys, FixedArray, kKeysOffset)
+ACCESSORS(EnumCache, indices, FixedArray, kIndicesOffset)
 
 ACCESSORS(DescriptorArray, enum_cache, EnumCache, kEnumCacheOffset)
 RELAXED_INT16_ACCESSORS(DescriptorArray, number_of_all_descriptors,
@@ -50,30 +54,30 @@ inline int16_t DescriptorArray::CompareAndSwapRawNumberOfMarkedDescriptors(
     int16_t expected, int16_t value) {
   return base::Relaxed_CompareAndSwap(
       reinterpret_cast<base::Atomic16*>(
-          FIELD_ADDR(this, kRawNumberOfMarkedDescriptorsOffset)),
+          FIELD_ADDR(*this, kRawNumberOfMarkedDescriptorsOffset)),
       expected, value);
 }
 
 void DescriptorArray::CopyEnumCacheFrom(DescriptorArray array) {
-  set_enum_cache(array->enum_cache());
+  set_enum_cache(array.enum_cache());
 }
 
 int DescriptorArray::Search(Name name, int valid_descriptors) {
-  DCHECK(name->IsUniqueName());
+  DCHECK(name.IsUniqueName());
   return internal::Search<VALID_ENTRIES>(this, name, valid_descriptors,
                                          nullptr);
 }
 
 int DescriptorArray::Search(Name name, Map map) {
-  DCHECK(name->IsUniqueName());
-  int number_of_own_descriptors = map->NumberOfOwnDescriptors();
+  DCHECK(name.IsUniqueName());
+  int number_of_own_descriptors = map.NumberOfOwnDescriptors();
   if (number_of_own_descriptors == 0) return kNotFound;
   return Search(name, number_of_own_descriptors);
 }
 
 int DescriptorArray::SearchWithCache(Isolate* isolate, Name name, Map map) {
-  DCHECK(name->IsUniqueName());
-  int number_of_own_descriptors = map->NumberOfOwnDescriptors();
+  DCHECK(name.IsUniqueName());
+  int number_of_own_descriptors = map.NumberOfOwnDescriptors();
   if (number_of_own_descriptors == 0) return kNotFound;
 
   DescriptorLookupCache* cache = isolate->descriptor_lookup_cache();
@@ -88,7 +92,11 @@ int DescriptorArray::SearchWithCache(Isolate* isolate, Name name, Map map) {
 }
 
 ObjectSlot DescriptorArray::GetFirstPointerSlot() {
-  return RawField(DescriptorArray::kPointersStartOffset);
+  static_assert(kEndOfStrongFieldsOffset == kStartOfWeakFieldsOffset,
+                "Weak and strong fields are continuous.");
+  static_assert(kEndOfWeakFieldsOffset == kHeaderSize,
+                "Weak fields extend up to the end of the header.");
+  return RawField(DescriptorArray::kStartOfStrongFieldsOffset);
 }
 
 ObjectSlot DescriptorArray::GetDescriptorSlot(int descriptor) {
@@ -101,7 +109,7 @@ ObjectSlot DescriptorArray::GetDescriptorSlot(int descriptor) {
 ObjectSlot DescriptorArray::GetKeySlot(int descriptor) {
   DCHECK_LE(descriptor, number_of_all_descriptors());
   ObjectSlot slot = GetDescriptorSlot(descriptor) + kEntryKeyIndex;
-  DCHECK((*slot)->IsObject());
+  DCHECK((*slot).IsObject());
   return slot;
 }
 
@@ -190,7 +198,7 @@ void DescriptorArray::Append(Descriptor* desc) {
 
   for (insertion = descriptor_number; insertion > 0; --insertion) {
     Name key = GetSortedKey(insertion - 1);
-    if (key->Hash() <= hash) break;
+    if (key.Hash() <= hash) break;
     SetSortedKey(insertion, GetSortedKeyIndex(insertion - 1));
   }
 

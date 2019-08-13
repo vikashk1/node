@@ -9,6 +9,7 @@ const common = require('../common');
 const assert = require('assert');
 
 const expectedModules = new Set([
+  'Internal Binding errors',
   'Internal Binding async_wrap',
   'Internal Binding buffer',
   'Internal Binding config',
@@ -63,7 +64,6 @@ const expectedModules = new Set([
   'NativeModule path',
   'NativeModule timers',
   'NativeModule url',
-  'NativeModule util',
   'NativeModule vm',
 ]);
 
@@ -106,7 +106,7 @@ if (process.features.inspector) {
 }
 
 if (process.env.NODE_V8_COVERAGE) {
-  expectedModules.add('NativeModule internal/profiler');
+  expectedModules.add('Internal Binding profiler');
 }
 
 const difference = (setA, setB) => {

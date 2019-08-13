@@ -6,9 +6,9 @@
 
 #include "src/ast/ast.h"
 #include "src/base/bits.h"
-#include "src/counters.h"
-#include "src/heap/heap.h"
+#include "src/heap/heap-inl.h"  // For InYoungGeneration().
 #include "src/ic/ic-inl.h"
+#include "src/logging/counters.h"
 
 namespace v8 {
 namespace internal {
@@ -31,12 +31,13 @@ void StubCache::Initialize() {
 int StubCache::PrimaryOffset(Name name, Map map) {
   STATIC_ASSERT(kCacheIndexShift == Name::kHashShift);
   // Compute the hash of the name (use entire hash field).
-  DCHECK(name->HasHashCode());
-  uint32_t field = name->hash_field();
+  DCHECK(name.HasHashCode());
+  uint32_t field = name.hash_field();
   // Using only the low bits in 64-bit mode is unlikely to increase the
   // risk of collision even if the heap is spread over an area larger than
   // 4Gb (and not at all if it isn't).
-  uint32_t map_low32bits = static_cast<uint32_t>(map.ptr());
+  uint32_t map_low32bits =
+      static_cast<uint32_t>(map.ptr() ^ (map.ptr() >> kMapKeyShift));
   // Base the offset on a simple combination of name and map.
   uint32_t key = map_low32bits + field;
   return key & ((kPrimaryTableSize - 1) << kCacheIndexShift);
@@ -67,10 +68,10 @@ bool CommonStubCacheChecks(StubCache* stub_cache, Name name, Map map,
                            MaybeObject handler) {
   // Validate that the name and handler do not move on scavenge, and that we
   // can use identity checks instead of structural equality checks.
-  DCHECK(!Heap::InNewSpace(name));
-  DCHECK(!Heap::InNewSpace(handler));
-  DCHECK(name->IsUniqueName());
-  DCHECK(name->HasHashCode());
+  DCHECK(!Heap::InYoungGeneration(name));
+  DCHECK(!Heap::InYoungGeneration(handler));
+  DCHECK(name.IsUniqueName());
+  DCHECK(name.HasHashCode());
   if (handler->ptr() != kNullAddress) DCHECK(IC::IsHandler(handler));
   return true;
 }

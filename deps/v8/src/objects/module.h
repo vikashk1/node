@@ -5,9 +5,9 @@
 #ifndef V8_OBJECTS_MODULE_H_
 #define V8_OBJECTS_MODULE_H_
 
-#include "src/objects.h"
 #include "src/objects/fixed-array.h"
 #include "src/objects/js-objects.h"
+#include "src/objects/objects.h"
 #include "src/objects/struct.h"
 
 // Has to be the last include (doesn't have include guards):
@@ -333,20 +333,8 @@ class ModuleInfoEntry : public Struct {
                                      int module_request, int cell_index,
                                      int beg_pos, int end_pos);
 
-// Layout description.
-#define MODULE_INFO_FIELDS(V)          \
-  V(kExportNameOffset, kTaggedSize)    \
-  V(kLocalNameOffset, kTaggedSize)     \
-  V(kImportNameOffset, kTaggedSize)    \
-  V(kModuleRequestOffset, kTaggedSize) \
-  V(kCellIndexOffset, kTaggedSize)     \
-  V(kBegPosOffset, kTaggedSize)        \
-  V(kEndPosOffset, kTaggedSize)        \
-  /* Total size. */                    \
-  V(kSize, 0)
-
-  DEFINE_FIELD_OFFSET_CONSTANTS(Struct::kHeaderSize, MODULE_INFO_FIELDS)
-#undef MODULE_INFO_FIELDS
+  DEFINE_FIELD_OFFSET_CONSTANTS(Struct::kHeaderSize,
+                                TORQUE_GENERATED_MODULE_INFO_ENTRY_FIELDS)
 
   OBJECT_CONSTRUCTORS(ModuleInfoEntry, Struct);
 };

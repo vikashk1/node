@@ -25,6 +25,10 @@ function Benchmark(fn, configs, options) {
   if (options && options.flags) {
     this.flags = this.flags.concat(options.flags);
   }
+  if (process.env.NODE_BENCHMARK_FLAGS) {
+    const flags = process.env.NODE_BENCHMARK_FLAGS.split(/\s+/);
+    this.flags = this.flags.concat(flags);
+  }
   // Holds process.hrtime value
   this._time = [0, 0];
   // Used to make sure a benchmark only start a timer once
@@ -202,7 +206,7 @@ Benchmark.prototype.end = function(operations) {
   if (elapsed[0] === 0 && elapsed[1] === 0) {
     if (!process.env.NODEJS_BENCHMARK_ZERO_ALLOWED)
       throw new Error('insufficient clock precision for short benchmark');
-    // avoid dividing by zero
+    // Avoid dividing by zero
     elapsed[1] = 1;
   }
 

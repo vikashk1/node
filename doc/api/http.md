@@ -318,6 +318,10 @@ Until the data is consumed, the `'end'` event will not fire. Also, until
 the data is read it will consume memory that can eventually lead to a
 'process out of memory' error.
 
+Unlike the `request` object, if the response closes prematurely, the
+`response` object does not emit an `'error'` event but instead emits the
+`'aborted'` event.
+
 Node.js does not check whether Content-Length and the length of the
 body which has been transmitted are equal or not.
 
@@ -358,7 +362,7 @@ const proxy = http.createServer((req, res) => {
   res.end('okay');
 });
 proxy.on('connect', (req, cltSocket, head) => {
-  // connect to an origin server
+  // Connect to an origin server
   const srvUrl = url.parse(`http://${req.url}`);
   const srvSocket = net.connect(srvUrl.port, srvUrl.hostname, () => {
     cltSocket.write('HTTP/1.1 200 Connection Established\r\n' +
@@ -370,7 +374,7 @@ proxy.on('connect', (req, cltSocket, head) => {
   });
 });
 
-// now that proxy is running
+// Now that proxy is running
 proxy.listen(1337, '127.0.0.1', () => {
 
   // Make a request to a tunneling proxy
@@ -416,8 +420,19 @@ the client should send the request body.
 added: v10.0.0
 -->
 
-Emitted when the server sends a 1xx response (excluding 101 Upgrade). This
-event is emitted with a callback containing an object with a status code.
+* `info` {Object}
+  * `httpVersion` {string}
+  * `httpVersionMajor` {integer}
+  * `httpVersionMinor` {integer}
+  * `statusCode` {integer}
+  * `statusMessage` {string}
+  * `headers` {Object}
+  * `rawHeaders` {string[]}
+
+Emitted when the server sends a 1xx intermediate response (excluding 101
+Upgrade). The listeners of this event will receive an object containing the
+HTTP version, status code, status message, key-value headers object,
+and array with the raw header names followed by their respective values.
 
 ```js
 const http = require('http');
@@ -432,8 +447,8 @@ const options = {
 const req = http.request(options);
 req.end();
 
-req.on('information', (res) => {
-  console.log(`Got information prior to main response: ${res.statusCode}`);
+req.on('information', (info) => {
+  console.log(`Got information prior to main response: ${info.statusCode}`);
 });
 ```
 
@@ -504,7 +519,7 @@ srv.on('upgrade', (req, socket, head) => {
   socket.pipe(socket); // echo back
 });
 
-// now that server is running
+// Now that server is running
 srv.listen(1337, '127.0.0.1', () => {
 
   // make a request
@@ -599,7 +614,7 @@ request was initiated via [`http.get()`][].
 added: v1.6.0
 -->
 
-Flush the request headers.
+Flushes the request headers.
 
 For efficiency reasons, Node.js normally buffers the request headers until
 `request.end()` is called or the first chunk of request data is written. It
@@ -617,7 +632,7 @@ added: v1.6.0
 * `name` {string}
 * Returns: {any}
 
-Reads out a header on the request. Note that the name is case insensitive.
+Reads out a header on the request. The name is case-insensitive.
 The type of the return value depends on the arguments provided to
 [`request.setHeader()`][].
 
@@ -626,11 +641,11 @@ request.setHeader('content-type', 'text/html');
 request.setHeader('Content-Length', Buffer.byteLength(body));
 request.setHeader('Cookie', ['type=ninja', 'language=javascript']);
 const contentType = request.getHeader('Content-Type');
-// contentType is 'text/html'
+// 'contentType' is 'text/html'
 const contentLength = request.getHeader('Content-Length');
-// contentLength is of type number
+// 'contentLength' is of type number
 const cookie = request.getHeader('Cookie');
-// cookie is of type string[]
+// 'cookie' is of type string[]
 ```
 
 ### request.maxHeadersCount
@@ -745,7 +760,7 @@ req.once('response', (res) => {
   const ip = req.socket.localAddress;
   const port = req.socket.localPort;
   console.log(`Your IP address is ${ip} and your source port is ${port}.`);
-  // consume response object
+  // Consume response object
 });
 ```
 
@@ -803,7 +818,7 @@ client should continue to send the request body, or generating an appropriate
 HTTP response (e.g. 400 Bad Request) if the client should not continue to send
 the request body.
 
-Note that when this event is emitted and handled, the [`'request'`][] event will
+When this event is emitted and handled, the [`'request'`][] event will
 not be emitted.
 
 ### Event: 'checkExpectation'
@@ -818,7 +833,7 @@ Emitted each time a request with an HTTP `Expect` header is received, where the
 value is not `100-continue`. If this event is not listened for, the server will
 automatically respond with a `417 Expectation Failed` as appropriate.
 
-Note that when this event is emitted and handled, the [`'request'`][] event will
+When this event is emitted and handled, the [`'request'`][] event will
 not be emitted.
 
 ### Event: 'clientError'
@@ -835,7 +850,7 @@ changes:
     description: The `rawPacket` is the current buffer that just parsed. Adding
                  this buffer to the error object of `'clientError'` event is to
                  make it possible that developers can log the broken packet.
-  - version: REPLACEME
+  - version: v12.0.0
     pr-url: https://github.com/nodejs/node/pull/25605
     description: The default behavior will return a 431 Request Header
                  Fields Too Large if a HPE_HEADER_OVERFLOW error occurs.
@@ -932,7 +947,7 @@ added: v0.1.0
 * `request` {http.IncomingMessage}
 * `response` {http.ServerResponse}
 
-Emitted each time there is a request. Note that there may be multiple requests
+Emitted each time there is a request. There may be multiple requests
 per connection (in the case of HTTP Keep-Alive connections).
 
 ### Event: 'upgrade'
@@ -1010,9 +1025,13 @@ Limits maximum incoming headers count. If set to 0, no limit will be applied.
 ### server.setTimeout([msecs][, callback])
 <!-- YAML
 added: v0.9.12
+changes:
+  - version: REPLACEME
+    pr-url: https://github.com/nodejs/node/pull/27558
+    description: The default timeout changed from 120s to 0 (no timeout).
 -->
 
-* `msecs` {number} **Default:** `120000` (2 minutes)
+* `msecs` {number} **Default:** 0 (no timeout)
 * `callback` {Function}
 * Returns: {http.Server}
 
@@ -1023,16 +1042,20 @@ occurs.
 If there is a `'timeout'` event listener on the Server object, then it
 will be called with the timed-out socket as an argument.
 
-By default, the Server's timeout value is 2 minutes, and sockets are
-destroyed automatically if they time out. However, if a callback is assigned
-to the Server's `'timeout'` event, timeouts must be handled explicitly.
+By default, the Server does not timeout sockets. However, if a callback
+is assigned to the Server's `'timeout'` event, timeouts must be handled
+explicitly.
 
 ### server.timeout
 <!-- YAML
 added: v0.9.12
+changes:
+  - version: REPLACEME
+    pr-url: https://github.com/nodejs/node/pull/27558
+    description: The default timeout changed from 120s to 0 (no timeout).
 -->
 
-* {number} Timeout in milliseconds. **Default:** `120000` (2 minutes).
+* {number} Timeout in milliseconds. **Default:** 0 (no timeout)
 
 The number of milliseconds of inactivity before a socket is presumed
 to have timed out.
@@ -1105,7 +1128,7 @@ Trailers will **only** be emitted if chunked encoding is used for the
 response; if it is not (e.g. if the request was HTTP/1.0), they will
 be silently discarded.
 
-Note that HTTP requires the `Trailer` header to be sent in order to
+HTTP requires the `Trailer` header to be sent in order to
 emit trailers, with a list of the header fields in its value. E.g.,
 
 ```js
@@ -1159,8 +1182,15 @@ added: v0.0.2
 
 * {boolean}
 
-Boolean value that indicates whether the response has completed. Starts
-as `false`. After [`response.end()`][] executes, the value will be `true`.
+The `response.finished` property will be `true` if [`response.end()`][]
+has been called.
+
+### response.flushHeaders()
+<!-- YAML
+added: v1.6.0
+-->
+
+Flushes the response headers. See also: [`request.flushHeaders()`][].
 
 ### response.getHeader(name)
 <!-- YAML
@@ -1171,7 +1201,7 @@ added: v0.4.0
 * Returns: {any}
 
 Reads out a header that's already been queued but not sent to the client.
-Note that the name is case insensitive. The type of the return value depends
+The name is case-insensitive. The type of the return value depends
 on the arguments provided to [`response.setHeader()`][].
 
 ```js
@@ -1239,7 +1269,7 @@ added: v7.7.0
 * Returns: {boolean}
 
 Returns `true` if the header identified by `name` is currently set in the
-outgoing headers. Note that the header name matching is case-insensitive.
+outgoing headers. The header name matching is case-insensitive.
 
 ```js
 const hasContentType = response.hasHeader('content-type');
@@ -1374,7 +1404,7 @@ const server = http.createServer((req, res) => {
 added: v0.4.0
 -->
 
-* {number}
+* {number} **Default:** `200`
 
 When using implicit headers (not calling [`response.writeHead()`][] explicitly),
 this property controls the status code that will be sent to the client when
@@ -1406,6 +1436,16 @@ response.statusMessage = 'Not found';
 After response header was sent to the client, this property indicates the
 status message which was sent out.
 
+### response.writableFinished
+<!-- YAML
+added: v12.7.0
+-->
+
+* {boolean}
+
+Is `true` if all data has been flushed to the underlying system, immediately
+before the [`'finish'`][] event is emitted.
+
 ### response.write(chunk[, encoding][, callback])
 <!-- YAML
 added: v0.1.29
@@ -1422,7 +1462,7 @@ it will switch to implicit header mode and flush the implicit headers.
 This sends a chunk of the response body. This method may
 be called multiple times to provide successive parts of the body.
 
-Note that in the `http` module, the response body is omitted when the
+In the `http` module, the response body is omitted when the
 request is a HEAD request. Similarly, the `204` and `304` responses
 _must not_ include a message body.
 
@@ -1515,11 +1555,11 @@ const server = http.createServer((req, res) => {
 });
 ```
 
-Note that Content-Length is given in bytes not characters. The above example
+`Content-Length` is given in bytes not characters. The above example
 works because the string `'hello world'` contains only single byte characters.
 If the body contains higher coded characters then `Buffer.byteLength()`
 should be used to determine the number of bytes in a given encoding.
-And Node.js does not check whether Content-Length and the length of the body
+And Node.js does not check whether `Content-Length` and the length of the body
 which has been transmitted are equal or not.
 
 Attempting to set a header field name or value that contains invalid characters
@@ -1674,7 +1714,7 @@ added: v0.11.6
 
 The raw request/response headers list exactly as they were received.
 
-Note that the keys and values are in the same list. It is *not* a
+The keys and values are in the same list. It is *not* a
 list of tuples. So, the even-numbered offsets are key values, and the
 odd-numbered offsets are the associated values.
 
@@ -1895,7 +1935,7 @@ changes:
 Since most requests are GET requests without bodies, Node.js provides this
 convenience method. The only difference between this method and
 [`http.request()`][] is that it sets the method to GET and calls `req.end()`
-automatically. Note that the callback must take care to consume the response
+automatically. The callback must take care to consume the response
 data for reasons stated in [`http.ClientRequest`][] section.
 
 The `callback` is invoked with a single argument that is an instance of
@@ -2065,12 +2105,12 @@ req.on('error', (e) => {
   console.error(`problem with request: ${e.message}`);
 });
 
-// write data to request body
+// Write data to request body
 req.write(postData);
 req.end();
 ```
 
-Note that in the example `req.end()` was called. With `http.request()` one
+In the example `req.end()` was called. With `http.request()` one
 must always call `req.end()` to signify the end of the request -
 even if there is no data being written to the request body.
 
@@ -2144,7 +2184,7 @@ will be emitted in the following order:
 * `'end'` on the `res` object
 * `'close'` on the `res` object
 
-Note that setting the `timeout` option or using the `setTimeout()` function will
+Setting the `timeout` option or using the `setTimeout()` function will
 not abort the request or do anything besides add a `'timeout'` event.
 
 [`--max-http-header-size`]: cli.html#cli_max_http_header_size_size
@@ -2159,6 +2199,7 @@ not abort the request or do anything besides add a `'timeout'` event.
 [`agent.createConnection()`]: #http_agent_createconnection_options_callback
 [`agent.getName()`]: #http_agent_getname_options
 [`destroy()`]: #http_agent_destroy
+[`'finish'`]: #http_event_finish
 [`getHeader(name)`]: #http_request_getheader_name
 [`http.Agent`]: #http_class_http_agent
 [`http.ClientRequest`]: #http_class_http_clientrequest
@@ -2175,6 +2216,7 @@ not abort the request or do anything besides add a `'timeout'` event.
 [`new URL()`]: url.html#url_constructor_new_url_input_base
 [`removeHeader(name)`]: #http_request_removeheader_name
 [`request.end()`]: #http_request_end_data_encoding_callback
+[`request.flushHeaders()`]: #http_request_flushheaders
 [`request.getHeader()`]: #http_request_getheader_name
 [`request.setHeader()`]: #http_request_setheader_name_value
 [`request.setTimeout()`]: #http_request_settimeout_timeout_callback

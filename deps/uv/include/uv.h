@@ -202,6 +202,7 @@ typedef enum {
 /* Handle types. */
 typedef struct uv_loop_s uv_loop_t;
 typedef struct uv_handle_s uv_handle_t;
+typedef struct uv_dir_s uv_dir_t;
 typedef struct uv_stream_s uv_stream_t;
 typedef struct uv_tcp_s uv_tcp_t;
 typedef struct uv_udp_s uv_udp_t;
@@ -230,11 +231,13 @@ typedef struct uv_fs_s uv_fs_t;
 typedef struct uv_work_s uv_work_t;
 
 /* None of the above. */
+typedef struct uv_env_item_s uv_env_item_t;
 typedef struct uv_cpu_info_s uv_cpu_info_t;
 typedef struct uv_interface_address_s uv_interface_address_t;
 typedef struct uv_dirent_s uv_dirent_t;
 typedef struct uv_passwd_s uv_passwd_t;
 typedef struct uv_utsname_s uv_utsname_t;
+typedef struct uv_statfs_s uv_statfs_t;
 
 typedef enum {
   UV_LOOP_BLOCK_SIGNAL
@@ -1069,6 +1072,17 @@ struct uv_utsname_s {
      to as meaningless in the docs. */
 };
 
+struct uv_statfs_s {
+  uint64_t f_type;
+  uint64_t f_bsize;
+  uint64_t f_blocks;
+  uint64_t f_bfree;
+  uint64_t f_bavail;
+  uint64_t f_files;
+  uint64_t f_ffree;
+  uint64_t f_spare[4];
+};
+
 typedef enum {
   UV_DIRENT_UNKNOWN,
   UV_DIRENT_FILE,
@@ -1097,6 +1111,11 @@ typedef struct {
   long tv_sec;
   long tv_usec;
 } uv_timeval_t;
+
+typedef struct {
+  int64_t tv_sec;
+  int32_t tv_usec;
+} uv_timeval64_t;
 
 typedef struct {
    uv_timeval_t ru_utime; /* user CPU time used */
@@ -1144,6 +1163,13 @@ UV_EXTERN int uv_interface_addresses(uv_interface_address_t** addresses,
 UV_EXTERN void uv_free_interface_addresses(uv_interface_address_t* addresses,
                                            int count);
 
+struct uv_env_item_s {
+  char* name;
+  char* value;
+};
+
+UV_EXTERN int uv_os_environ(uv_env_item_t** envitems, int* count);
+UV_EXTERN void uv_os_free_environ(uv_env_item_t* envitems, int count);
 UV_EXTERN int uv_os_getenv(const char* name, char* buffer, size_t* size);
 UV_EXTERN int uv_os_setenv(const char* name, const char* value);
 UV_EXTERN int uv_os_unsetenv(const char* name);
@@ -1196,8 +1222,19 @@ typedef enum {
   UV_FS_FCHOWN,
   UV_FS_REALPATH,
   UV_FS_COPYFILE,
-  UV_FS_LCHOWN
+  UV_FS_LCHOWN,
+  UV_FS_OPENDIR,
+  UV_FS_READDIR,
+  UV_FS_CLOSEDIR,
+  UV_FS_STATFS
 } uv_fs_type;
+
+struct uv_dir_s {
+  uv_dirent_t* dirents;
+  size_t nentries;
+  void* reserved[4];
+  UV_DIR_PRIVATE_FIELDS
+};
 
 /* uv_fs_t is a subclass of uv_req_t. */
 struct uv_fs_s {
@@ -1291,6 +1328,18 @@ UV_EXTERN int uv_fs_scandir(uv_loop_t* loop,
                             uv_fs_cb cb);
 UV_EXTERN int uv_fs_scandir_next(uv_fs_t* req,
                                  uv_dirent_t* ent);
+UV_EXTERN int uv_fs_opendir(uv_loop_t* loop,
+                            uv_fs_t* req,
+                            const char* path,
+                            uv_fs_cb cb);
+UV_EXTERN int uv_fs_readdir(uv_loop_t* loop,
+                            uv_fs_t* req,
+                            uv_dir_t* dir,
+                            uv_fs_cb cb);
+UV_EXTERN int uv_fs_closedir(uv_loop_t* loop,
+                             uv_fs_t* req,
+                             uv_dir_t* dir,
+                             uv_fs_cb cb);
 UV_EXTERN int uv_fs_stat(uv_loop_t* loop,
                          uv_fs_t* req,
                          const char* path,
@@ -1404,6 +1453,10 @@ UV_EXTERN int uv_fs_lchown(uv_loop_t* loop,
                            const char* path,
                            uv_uid_t uid,
                            uv_gid_t gid,
+                           uv_fs_cb cb);
+UV_EXTERN int uv_fs_statfs(uv_loop_t* loop,
+                           uv_fs_t* req,
+                           const char* path,
                            uv_fs_cb cb);
 
 
@@ -1533,6 +1586,7 @@ UV_EXTERN int uv_chdir(const char* dir);
 
 UV_EXTERN uint64_t uv_get_free_memory(void);
 UV_EXTERN uint64_t uv_get_total_memory(void);
+UV_EXTERN uint64_t uv_get_constrained_memory(void);
 
 UV_EXTERN uint64_t uv_hrtime(void);
 
@@ -1585,6 +1639,8 @@ UV_EXTERN int uv_key_create(uv_key_t* key);
 UV_EXTERN void uv_key_delete(uv_key_t* key);
 UV_EXTERN void* uv_key_get(uv_key_t* key);
 UV_EXTERN void uv_key_set(uv_key_t* key, void* value);
+
+UV_EXTERN int uv_gettimeofday(uv_timeval64_t* tv);
 
 typedef void (*uv_thread_cb)(void* arg);
 

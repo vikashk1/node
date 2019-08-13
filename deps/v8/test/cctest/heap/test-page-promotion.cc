@@ -2,11 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "src/execution/isolate.h"
 #include "src/heap/array-buffer-tracker.h"
 #include "src/heap/factory.h"
 #include "src/heap/spaces-inl.h"
-#include "src/isolate.h"
-#include "src/objects-inl.h"
+#include "src/objects/objects-inl.h"
 #include "test/cctest/cctest.h"
 #include "test/cctest/heap/heap-tester.h"
 #include "test/cctest/heap/heap-utils.h"
@@ -66,6 +66,11 @@ UNINITIALIZED_TEST(PagePromotion_NewToOld) {
     v8::HandleScope handle_scope(isolate);
     v8::Context::New(isolate)->Enter();
     Heap* heap = i_isolate->heap();
+
+    // Ensure that the new space is empty so that the page to be promoted
+    // does not contain the age mark.
+    heap->CollectGarbage(NEW_SPACE, i::GarbageCollectionReason::kTesting);
+    heap->CollectGarbage(NEW_SPACE, i::GarbageCollectionReason::kTesting);
 
     std::vector<Handle<FixedArray>> handles;
     heap::SimulateFullSpace(heap->new_space(), &handles);

@@ -44,7 +44,7 @@ added: v0.11.8
 SPKAC is a Certificate Signing Request mechanism originally implemented by
 Netscape and was specified formally as part of [HTML5's `keygen` element][].
 
-Note that `<keygen>` is deprecated since [HTML 5.2][] and new projects
+`<keygen>` is deprecated since [HTML 5.2][] and new projects
 should not use this element anymore.
 
 The `crypto` module provides the `Certificate` class for working with SPKAC
@@ -698,6 +698,32 @@ module):
 * `DH_UNABLE_TO_CHECK_GENERATOR`
 * `DH_NOT_SUITABLE_GENERATOR`
 
+## Class: DiffieHellmanGroup
+<!-- YAML
+added: v0.7.5
+-->
+
+The `DiffieHellmanGroup` class takes a well-known modp group as its argument but
+otherwise works the same as `DiffieHellman`.
+
+```js
+const name = 'modp1';
+const dh = crypto.createDiffieHellmanGroup(name);
+```
+
+`name` is taken from [RFC 2412][] (modp1 and 2) and [RFC 3526][]:
+```console
+$ perl -ne 'print "$1\n" if /"(modp\d+)"/' src/node_crypto_groups.h
+modp1  #  768 bits
+modp2  # 1024 bits
+modp5  # 1536 bits
+modp14 # 2048 bits
+modp15 # etc.
+modp16
+modp17
+modp18
+```
+
 ## Class: ECDH
 <!-- YAML
 added: v0.11.14
@@ -887,7 +913,7 @@ Sets the EC Diffie-Hellman public key.
 If `encoding` is provided `publicKey` is expected to
 be a string; otherwise a [`Buffer`][], `TypedArray`, or `DataView` is expected.
 
-Note that there is not normally a reason to call this method because `ECDH`
+There is not normally a reason to call this method because `ECDH`
 only requires a private key and the other party's public key to compute the
 shared secret. Typically either [`ecdh.generateKeys()`][] or
 [`ecdh.setPrivateKey()`][] will be called. The [`ecdh.setPrivateKey()`][] method
@@ -1110,7 +1136,7 @@ This can be called many times with new data as it is streamed.
 <!-- YAML
 added: v11.6.0
 changes:
-  - version: REPLACEME
+  - version: v11.13.0
     pr-url: https://github.com/nodejs/node/pull/26438
     description: This class is now exported.
 -->
@@ -1129,18 +1155,36 @@ passing keys as strings or `Buffer`s due to improved security features.
 <!-- YAML
 added: v11.6.0
 changes:
-  - version: REPLACEME
+  - version: v12.0.0
+    pr-url: https://github.com/nodejs/node/pull/26960
+    description: Added support for `'rsa-pss'`
+  - version: v12.0.0
+    pr-url: https://github.com/nodejs/node/pull/26786
+    description: This property now returns `undefined` for KeyObject
+                 instances of unrecognized type instead of aborting.
+  - version: v12.0.0
     pr-url: https://github.com/nodejs/node/pull/26774
     description: Added support for `'x25519'` and `'x448'`
-  - version: REPLACEME
+  - version: v12.0.0
     pr-url: https://github.com/nodejs/node/pull/26319
-    description: Added support for `'ed25519'` and `'ed448'`
+    description: Added support for `'ed25519'` and `'ed448'`.
 -->
 * {string}
 
-For asymmetric keys, this property represents the type of the embedded key
-(`'rsa'`, `'dsa'`, `'ec'`, `'ed25519'`, `'ed448'`, `'x25519'` or `'x448'`).
-This property is `undefined` for symmetric keys.
+For asymmetric keys, this property represents the type of the key. Supported key
+types are:
+
+* `'rsa'` (OID 1.2.840.113549.1.1.1)
+* `'rsa-pss'` (OID 1.2.840.113549.1.1.10)
+* `'dsa'` (OID 1.2.840.10040.4.1)
+* `'ec'` (OID 1.2.840.10045.2.1)
+* `'x25519'` (OID 1.3.101.110)
+* `'x448'` (OID 1.3.101.111)
+* `'ed25519'` (OID 1.3.101.112)
+* `'ed448'` (OID 1.3.101.113)
+
+This property is `undefined` for unrecognized `KeyObject` types and symmetric
+keys.
 
 ### keyObject.export([options])
 <!-- YAML
@@ -1266,6 +1310,9 @@ console.log(verify.verify(publicKey, signature));
 <!-- YAML
 added: v0.1.92
 changes:
+  - version: v12.0.0
+    pr-url: https://github.com/nodejs/node/pull/26960
+    description: This function now supports RSA-PSS keys.
   - version: v11.6.0
     pr-url: https://github.com/nodejs/node/pull/24234
     description: This function now supports key objects.
@@ -1290,8 +1337,10 @@ object, the following additional properties can be passed:
   * `crypto.constants.RSA_PKCS1_PADDING` (default)
   * `crypto.constants.RSA_PKCS1_PSS_PADDING`
 
-  Note that `RSA_PKCS1_PSS_PADDING` will use MGF1 with the same hash function
-  used to sign the message as specified in section 3.1 of [RFC 4055][].
+  `RSA_PKCS1_PSS_PADDING` will use MGF1 with the same hash function
+  used to sign the message as specified in section 3.1 of [RFC 4055][], unless
+  an MGF1 hash function has been specified as part of the key in compliance with
+  section 3.3 of [RFC 4055][].
 * `saltLength`: {integer} - salt length for when padding is
   `RSA_PKCS1_PSS_PADDING`. The special value
   `crypto.constants.RSA_PSS_SALTLEN_DIGEST` sets the salt length to the digest
@@ -1364,6 +1413,9 @@ This can be called many times with new data as it is streamed.
 <!-- YAML
 added: v0.1.92
 changes:
+  - version: v12.0.0
+    pr-url: https://github.com/nodejs/node/pull/26960
+    description: This function now supports RSA-PSS keys.
   - version: v11.7.0
     pr-url: https://github.com/nodejs/node/pull/25217
     description: The key can now be a private key.
@@ -1389,8 +1441,10 @@ object, the following additional properties can be passed:
   * `crypto.constants.RSA_PKCS1_PADDING` (default)
   * `crypto.constants.RSA_PKCS1_PSS_PADDING`
 
-  Note that `RSA_PKCS1_PSS_PADDING` will use MGF1 with the same hash function
-  used to verify the message as specified in section 3.1 of [RFC 4055][].
+  `RSA_PKCS1_PSS_PADDING` will use MGF1 with the same hash function
+  used to verify the message as specified in section 3.1 of [RFC 4055][], unless
+  an MGF1 hash function has been specified as part of the key in compliance with
+  section 3.3 of [RFC 4055][].
 * `saltLength`: {integer} - salt length for when padding is
   `RSA_PKCS1_PSS_PADDING`. The special value
   `crypto.constants.RSA_PSS_SALTLEN_DIGEST` sets the salt length to the digest
@@ -1705,6 +1759,16 @@ Creates a `DiffieHellman` key exchange object and generates a prime of
 `primeLength` bits using an optional specific numeric `generator`.
 If `generator` is not specified, the value `2` is used.
 
+### crypto.createDiffieHellmanGroup(name)
+<!-- YAML
+added: v0.9.3
+-->
+
+* `name` {string}
+* Returns: {DiffieHellman}
+
+An alias for [`crypto.getDiffieHellman()`][]
+
 ### crypto.createECDH(curveName)
 <!-- YAML
 added: v0.11.14
@@ -1721,6 +1785,10 @@ and description of each available elliptic curve.
 ### crypto.createHash(algorithm[, options])
 <!-- YAML
 added: v0.1.92
+changes:
+  - version: v12.8.0
+    pr-url: https://github.com/nodejs/node/pull/28805
+    description: The `outputLength` option was added for XOF hash functions.
 -->
 * `algorithm` {string}
 * `options` {Object} [`stream.transform` options][]
@@ -1728,7 +1796,8 @@ added: v0.1.92
 
 Creates and returns a `Hash` object that can be used to generate hash digests
 using the given `algorithm`. Optional `options` argument controls stream
-behavior.
+behavior. For XOF hash functions such as `'shake256'`, the `outputLength` option
+can be used to specify the desired output length in bytes.
 
 The `algorithm` is dependent on the available algorithms supported by the
 version of OpenSSL on the platform. Examples are `'sha256'`, `'sha512'`, etc.
@@ -1821,11 +1890,14 @@ Creates and returns a new key object containing a private key. If `key` is a
 string or `Buffer`, `format` is assumed to be `'pem'`; otherwise, `key`
 must be an object with the properties described above.
 
+If the private key is encrypted, a `passphrase` must be specified. The length
+of the passphrase is limited to 1024 bytes.
+
 ### crypto.createPublicKey(key)
 <!-- YAML
 added: v11.6.0
 changes:
-  - version: REPLACEME
+  - version: v11.13.0
     pr-url: https://github.com/nodejs/node/pull/26278
     description: The `key` argument can now be a `KeyObject` with type
                  `private`.
@@ -1906,10 +1978,10 @@ algorithm names.
 <!-- YAML
 added: v10.12.0
 changes:
-  - version: REPLACEME
+  - version: v12.0.0
     pr-url: https://github.com/nodejs/node/pull/26774
     description: Add ability to generate X25519 and X448 key pairs.
-  - version: REPLACEME
+  - version: v12.0.0
     pr-url: https://github.com/nodejs/node/pull/26554
     description: Add ability to generate Ed25519 and Ed448 key pairs.
   - version: v11.6.0
@@ -1970,7 +2042,7 @@ a `Promise` for an `Object` with `publicKey` and `privateKey` properties.
 <!-- YAML
 added: v10.12.0
 changes:
-  - version: REPLACEME
+  - version: v12.0.0
     pr-url: https://github.com/nodejs/node/pull/26554
     description: Add ability to generate Ed25519 and Ed448 key pairs.
   - version: v11.6.0
@@ -2169,8 +2241,8 @@ crypto.pbkdf2('secret', 'salt', 100000, 512, 'sha512', (err, derivedKey) => {
 An array of supported digest functions can be retrieved using
 [`crypto.getHashes()`][].
 
-Note that this API uses libuv's threadpool, which can have surprising and
-negative performance implications for some applications, see the
+This API uses libuv's threadpool, which can have surprising and
+negative performance implications for some applications; see the
 [`UV_THREADPOOL_SIZE`][] documentation for more information.
 
 ### crypto.pbkdf2Sync(password, salt, iterations, keylen, digest)
@@ -2235,11 +2307,16 @@ An array of supported digest functions can be retrieved using
 <!-- YAML
 added: v0.11.14
 changes:
+  - version: REPLACEME
+    pr-url: https://github.com/nodejs/node/pull/28335
+    description: The `oaepHash` option was added.
   - version: v11.6.0
     pr-url: https://github.com/nodejs/node/pull/24234
     description: This function now supports key objects.
 -->
 * `privateKey` {Object | string | Buffer | KeyObject}
+  - `oaepHash` {string} The hash function to use for OAEP padding.
+    **Default:** `'sha1'`
   - `padding` {crypto.constants} An optional padding value defined in
     `crypto.constants`, which may be: `crypto.constants.RSA_NO_PADDING`,
     `crypto.constants.RSA_PKCS1_PADDING`, or
@@ -2311,12 +2388,17 @@ be passed instead of a public key.
 <!-- YAML
 added: v0.11.14
 changes:
+  - version: REPLACEME
+    pr-url: https://github.com/nodejs/node/pull/28335
+    description: The `oaepHash` option was added.
   - version: v11.6.0
     pr-url: https://github.com/nodejs/node/pull/24234
     description: This function now supports key objects.
 -->
 * `key` {Object | string | Buffer | KeyObject}
   - `key` {string | Buffer | KeyObject} A PEM encoded public or private key.
+  - `oaepHash` {string} The hash function to use for OAEP padding.
+    **Default:** `'sha1'`
   - `passphrase` {string | Buffer} An optional passphrase for the private key.
   - `padding` {crypto.constants} An optional padding value defined in
     `crypto.constants`, which may be: `crypto.constants.RSA_NO_PADDING`,
@@ -2386,8 +2468,8 @@ This should normally never take longer than a few milliseconds. The only time
 when generating the random bytes may conceivably block for a longer period of
 time is right after boot, when the whole system is still low on entropy.
 
-Note that this API uses libuv's threadpool, which can have surprising and
-negative performance implications for some applications, see the
+This API uses libuv's threadpool, which can have surprising and
+negative performance implications for some applications; see the
 [`UV_THREADPOOL_SIZE`][] documentation for more information.
 
 The asynchronous version of `crypto.randomBytes()` is carried out in a single
@@ -2507,8 +2589,8 @@ crypto.randomFill(c, (err, buf) => {
 });
 ```
 
-Note that this API uses libuv's threadpool, which can have surprising and
-negative performance implications for some applications, see the
+This API uses libuv's threadpool, which can have surprising and
+negative performance implications for some applications; see the
 [`UV_THREADPOOL_SIZE`][] documentation for more information.
 
 The asynchronous version of `crypto.randomFill()` is carried out in a single
@@ -2520,6 +2602,9 @@ request.
 <!-- YAML
 added: v10.5.0
 changes:
+  - version: v12.8.0
+    pr-url: https://github.com/nodejs/node/pull/28799
+    description: The `maxmem` value can now be any safe integer.
   - version: v10.9.0
     pr-url: https://github.com/nodejs/node/pull/21525
     description: The `cost`, `blockSize` and `parallelization` option names
@@ -2574,6 +2659,9 @@ crypto.scrypt('secret', 'salt', 64, { N: 1024 }, (err, derivedKey) => {
 <!-- YAML
 added: v10.5.0
 changes:
+  - version: v12.8.0
+    pr-url: https://github.com/nodejs/node/pull/28799
+    description: The `maxmem` value can now be any safe integer.
   - version: v10.9.0
     pr-url: https://github.com/nodejs/node/pull/21525
     description: The `cost`, `blockSize` and `parallelization` option names
@@ -2659,6 +2747,35 @@ added: v10.0.0
 Enables the FIPS compliant crypto provider in a FIPS-enabled Node.js build.
 Throws an error if FIPS mode is not available.
 
+### crypto.sign(algorithm, data, key)
+<!-- YAML
+added: v12.0.0
+-->
+* `algorithm` {string | null | undefined}
+* `data` {Buffer | TypedArray | DataView}
+* `key` {Object | string | Buffer | KeyObject}
+* Returns: {Buffer}
+
+Calculates and returns the signature for `data` using the given private key and
+algorithm. If `algorithm` is `null` or `undefined`, then the algorithm is
+dependent upon the key type (especially Ed25519 and Ed448).
+
+If `key` is not a [`KeyObject`][], this function behaves as if `key` had been
+passed to [`crypto.createPrivateKey()`][]. If it is an object, the following
+additional properties can be passed:
+
+* `padding`: {integer} - Optional padding value for RSA, one of the following:
+  * `crypto.constants.RSA_PKCS1_PADDING` (default)
+  * `crypto.constants.RSA_PKCS1_PSS_PADDING`
+
+  `RSA_PKCS1_PSS_PADDING` will use MGF1 with the same hash function
+  used to sign the message as specified in section 3.1 of [RFC 4055][].
+* `saltLength`: {integer} - salt length for when padding is
+  `RSA_PKCS1_PSS_PADDING`. The special value
+  `crypto.constants.RSA_PSS_SALTLEN_DIGEST` sets the salt length to the digest
+  size, `crypto.constants.RSA_PSS_SALTLEN_MAX_SIGN` (default) sets it to the
+  maximum permissible value.
+
 ### crypto.timingSafeEqual(a, b)
 <!-- YAML
 added: v6.6.0
@@ -2679,6 +2796,41 @@ must have the same length.
 Use of `crypto.timingSafeEqual` does not guarantee that the *surrounding* code
 is timing-safe. Care should be taken to ensure that the surrounding code does
 not introduce timing vulnerabilities.
+
+### crypto.verify(algorithm, data, key, signature)
+<!-- YAML
+added: v12.0.0
+-->
+* `algorithm` {string | null | undefined}
+* `data` {Buffer | TypedArray | DataView}
+* `key` {Object | string | Buffer | KeyObject}
+* `signature` {Buffer | TypedArray | DataView}
+* Returns: {boolean}
+
+Verifies the given signature for `data` using the given key and algorithm. If
+`algorithm` is `null` or `undefined`, then the algorithm is dependent upon the
+key type (especially Ed25519 and Ed448).
+
+If `key` is not a [`KeyObject`][], this function behaves as if `key` had been
+passed to [`crypto.createPublicKey()`][]. If it is an object, the following
+additional properties can be passed:
+
+* `padding`: {integer} - Optional padding value for RSA, one of the following:
+  * `crypto.constants.RSA_PKCS1_PADDING` (default)
+  * `crypto.constants.RSA_PKCS1_PSS_PADDING`
+
+  `RSA_PKCS1_PSS_PADDING` will use MGF1 with the same hash function
+  used to sign the message as specified in section 3.1 of [RFC 4055][].
+* `saltLength`: {integer} - salt length for when padding is
+  `RSA_PKCS1_PSS_PADDING`. The special value
+  `crypto.constants.RSA_PSS_SALTLEN_DIGEST` sets the salt length to the digest
+  size, `crypto.constants.RSA_PSS_SALTLEN_MAX_SIGN` (default) sets it to the
+  maximum permissible value.
+
+The `signature` argument is the previously calculated signature for the `data`.
+
+Because public keys can be derived from private keys, a private key or a public
+key may be passed for `key`.
 
 ## Notes
 
@@ -2712,8 +2864,8 @@ it can be used to put the ECDH key pair into an inconsistent state.
 
 The `crypto` module still supports some algorithms which are already
 compromised and are not currently recommended for use. The API also allows
-the use of ciphers and hashes with a small key size that are considered to be
-too weak for safe use.
+the use of ciphers and hashes with a small key size that are too weak for safe
+use.
 
 Users should take full responsibility for selecting the crypto
 algorithm and key size according to their security requirements.
@@ -2742,7 +2894,7 @@ mode must adhere to certain restrictions when using the cipher API:
   bytes (`7 ≤ N ≤ 13`).
 - The length of the plaintext is limited to `2 ** (8 * (15 - N))` bytes.
 - When decrypting, the authentication tag must be set via `setAuthTag()` before
-  specifying additional authenticated data or calling `update()`.
+  calling `update()`.
   Otherwise, decryption will fail and `final()` will throw an error in
   compliance with section 2.6 of [RFC 3610][].
 - Using stream methods such as `write(data)`, `end(data)` or `pipe()` in CCM
@@ -2790,6 +2942,7 @@ try {
   decipher.final();
 } catch (err) {
   console.error('Authentication failed!');
+  return;
 }
 
 console.log(receivedPlaintext);
@@ -3130,6 +3283,7 @@ the `crypto`, `tls`, and `https` modules and are generally specific to OpenSSL.
 [`crypto.createSign()`]: #crypto_crypto_createsign_algorithm_options
 [`crypto.createVerify()`]: #crypto_crypto_createverify_algorithm_options
 [`crypto.getCurves()`]: #crypto_crypto_getcurves
+[`crypto.getDiffieHellman()`]: #crypto_crypto_getdiffiehellman_groupname
 [`crypto.getHashes()`]: #crypto_crypto_gethashes
 [`crypto.privateDecrypt()`]: #crypto_crypto_privatedecrypt_privatekey_buffer
 [`crypto.privateEncrypt()`]: #crypto_crypto_privateencrypt_privatekey_buffer

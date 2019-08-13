@@ -1,8 +1,8 @@
 'use strict';
+const { expectsError, mustCall } = require('../common');
 const assert = require('assert');
 const { createServer, maxHeaderSize } = require('http');
 const { createConnection } = require('net');
-const { expectsError, mustCall } = require('../common');
 
 const CRLF = '\r\n';
 const DUMMY_HEADER_NAME = 'Cookie: ';
@@ -19,7 +19,7 @@ const server = createServer();
 server.on('connection', mustCall((socket) => {
   socket.on('error', expectsError({
     type: Error,
-    message: 'Parse Error',
+    message: 'Parse Error: Header overflow',
     code: 'HPE_HEADER_OVERFLOW',
     bytesParsed: maxHeaderSize + PAYLOAD_GET.length,
     rawPacket: Buffer.from(PAYLOAD)

@@ -9,8 +9,8 @@
 #ifndef V8_OBJECTS_JS_LIST_FORMAT_INL_H_
 #define V8_OBJECTS_JS_LIST_FORMAT_INL_H_
 
-#include "src/objects-inl.h"
 #include "src/objects/js-list-format.h"
+#include "src/objects/objects-inl.h"
 
 // Has to be the last include (doesn't have include guards):
 #include "src/objects/object-macros.h"
@@ -23,7 +23,7 @@ OBJECT_CONSTRUCTORS_IMPL(JSListFormat, JSObject)
 // Base list format accessors.
 ACCESSORS(JSListFormat, locale, String, kLocaleOffset)
 ACCESSORS(JSListFormat, icu_formatter, Managed<icu::ListFormatter>,
-          kICUFormatterOffset)
+          kIcuFormatterOffset)
 SMI_ACCESSORS(JSListFormat, flags, kFlagsOffset)
 
 inline void JSListFormat::set_style(Style style) {
@@ -48,7 +48,7 @@ inline JSListFormat::Type JSListFormat::type() const {
   return TypeBits::decode(flags());
 }
 
-CAST_ACCESSOR(JSListFormat);
+CAST_ACCESSOR(JSListFormat)
 
 }  // namespace internal
 }  // namespace v8

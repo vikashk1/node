@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Flags: --harmony-intl-relative-time-format
-
 // For locale default the numberingSystem to 'latn'
 assertEquals(
     "latn",
@@ -39,10 +37,6 @@ assertEquals(
     "arabext",
     new Intl.RelativeTimeFormat("fa").resolvedOptions().numberingSystem
 );
-assertEquals(
-    "beng",
-    new Intl.RelativeTimeFormat("bn").resolvedOptions().numberingSystem
-);
 
 // For locale use -u-nu- to change to other numberingSystem
 assertEquals(
@@ -72,11 +66,6 @@ assertEquals(
     new Intl.RelativeTimeFormat("fa-u-nu-latn").resolvedOptions()
         .numberingSystem
 );
-assertEquals(
-    "latn",
-    new Intl.RelativeTimeFormat("bn-u-nu-latn").resolvedOptions()
-        .numberingSystem
-);
 
 // For locale use -u-nu- with invalid value still back to default.
 assertEquals(
@@ -88,10 +77,5 @@ assertEquals(
 assertEquals(
     "arabext",
     new Intl.RelativeTimeFormat("fa-u-nu-abcd").resolvedOptions()
-        .numberingSystem
-);
-assertEquals(
-    "beng",
-    new Intl.RelativeTimeFormat("bn-u-nu-abcd").resolvedOptions()
         .numberingSystem
 );

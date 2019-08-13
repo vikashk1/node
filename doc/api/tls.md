@@ -334,6 +334,34 @@ added: v0.3.2
 The `tls.Server` class is a subclass of `net.Server` that accepts encrypted
 connections using TLS or SSL.
 
+### Event: 'keylog'
+<!-- YAML
+added: v12.3.0
+-->
+
+* `line` {Buffer} Line of ASCII text, in NSS `SSLKEYLOGFILE` format.
+* `tlsSocket` {tls.TLSSocket} The `tls.TLSSocket` instance on which it was
+  generated.
+
+The `keylog` event is emitted when key material is generated or received by
+a connection to this server (typically before handshake has completed, but not
+necessarily). This keying material can be stored for debugging, as it allows
+captured TLS traffic to be decrypted. It may be emitted multiple times for
+each socket.
+
+A typical use case is to append received lines to a common text file, which
+is later used by software (such as Wireshark) to decrypt the traffic:
+
+```js
+const logFile = fs.createWriteStream('/tmp/ssl-keys.log', { flags: 'a' });
+// ...
+server.on('keylog', (line, tlsSocket) => {
+  if (tlsSocket.remoteAddress !== '...')
+    return; // Only log keys for a particular IP
+  logFile.write(line);
+});
+```
+
 ### Event: 'newSession'
 <!-- YAML
 added: v0.9.2
@@ -453,7 +481,7 @@ single argument when called:
 The `tlsSocket.authorized` property is a `boolean` indicating whether the
 client has been verified by one of the supplied Certificate Authorities for the
 server. If `tlsSocket.authorized` is `false`, then `socket.authorizationError`
-is set to describe how authorization failed. Note that depending on the settings
+is set to describe how authorization failed. Depending on the settings
 of the TLS server, unauthorized connections may still be accepted.
 
 The `tlsSocket.alpnProtocol` property is a string that contains the selected
@@ -586,6 +614,9 @@ connection is open.
 <!-- YAML
 added: v0.11.4
 changes:
+  - version: v12.2.0
+    pr-url: https://github.com/nodejs/node/pull/27497
+    description: The `enableTrace` option is now supported.
   - version: v5.0.0
     pr-url: https://github.com/nodejs/node/pull/2564
     description: ALPN options are supported now.
@@ -596,6 +627,7 @@ changes:
   instance of [`net.Socket`][] (for generic `Duplex` stream support
   on the client side, [`tls.connect()`][] must be used).
 * `options` {Object}
+  * `enableTrace`: See [`tls.createServer()`][]
   * `isServer`: The SSL/TLS protocol is asymmetrical, TLSSockets must know if
     they are to behave as a server or a client. If `true` the TLS socket will be
     instantiated as a server. **Default:** `false`.
@@ -619,6 +651,27 @@ changes:
     `secureContext` option is missing. Otherwise, they are ignored.
 
 Construct a new `tls.TLSSocket` object from an existing TCP socket.
+
+### Event: 'keylog'
+<!-- YAML
+added: v12.3.0
+-->
+
+* `line` {Buffer} Line of ASCII text, in NSS `SSLKEYLOGFILE` format.
+
+The `keylog` event is emitted on a client `tls.TLSSocket` when key material
+is generated or received by the socket. This keying material can be stored
+for debugging, as it allows captured TLS traffic to be decrypted. It may
+be emitted multiple times, before or after the handshake completes.
+
+A typical use case is to append received lines to a common text file, which
+is later used by software (such as Wireshark) to decrypt the traffic:
+
+```js
+const logFile = fs.createWriteStream('/tmp/ssl-keys.log', { flags: 'a' });
+// ...
+tlsSocket.on('keylog', (line) => logFile.write(line));
+```
 
 ### Event: 'OCSPResponse'
 <!-- YAML
@@ -725,6 +778,19 @@ added: v8.4.0
 Disables TLS renegotiation for this `TLSSocket` instance. Once called, attempts
 to renegotiate will trigger an `'error'` event on the `TLSSocket`.
 
+### tlsSocket.enableTrace()
+<!-- YAML
+added: v12.2.0
+-->
+
+When enabled, TLS packet trace information is written to `stderr`. This can be
+used to debug TLS connection problems.
+
+Note: The format of the output is identical to the output of `openssl s_client
+-trace` or `openssl s_server -trace`. While it is produced by OpenSSL's
+`SSL_trace()` function, the format is undocumented, can change without notice,
+and should not be relied on.
+
 ### tlsSocket.encrypted
 <!-- YAML
 added: v0.11.4
@@ -753,7 +819,7 @@ socket has been destroyed, `null` will be returned.
 <!-- YAML
 added: v0.11.4
 changes:
-  - version: REPLACEME
+  - version: v12.0.0
     pr-url: https://github.com/nodejs/node/pull/26625
     description: Return the minimum cipher version, instead of a fixed string
       (`'TLSv1/SSLv3'`).
@@ -851,11 +917,11 @@ certificate.
    It is returned as a `:` separated hexadecimal string. Example:
    `'2A:7A:C2:DD:...'`.
 * `ext_key_usage` {Array} (Optional) The extended key usage, a set of OIDs.
-* `subjectaltname` {Array} (Optional) An array of names for the subject, an
-   alternative to the `subject` names.
+* `subjectaltname` {string} (Optional) A string containing concatenated names
+ for the subject, an alternative to the `subject` names.
 * `infoAccess` {Array} (Optional) An array describing the AuthorityInfoAccess,
    used with OCSP.
-* `issuerCert` {Object} (Optional) The issuer certificate object. For
+* `issuerCertificate` {Object} (Optional) The issuer certificate object. For
    self-signed certificates, this may be a circular reference.
 
 The certificate may contain information about the public key, depending on
@@ -945,8 +1011,7 @@ Protocol versions are:
 * `'TLSv1.2'`
 * `'TLSv1.3'`
 
-See <https://www.openssl.org/docs/man1.1.1/man3/SSL_get_version.html> for more
-information.
+See the OpenSSL [`SSL_get_version`][] documentation for more information.
 
 ### tlsSocket.getSession()
 <!-- YAML
@@ -1046,9 +1111,10 @@ added: v0.11.8
     `true`.
   * `requestCert`
 * `callback` {Function} If `renegotiate()` returned `true`, callback is
-   attached once to the `'secure'` event. If it returned `false`, it will be
-   called in the next tick with `ERR_TLS_RENEGOTIATE`, unless the `tlsSocket`
-   has been destroyed, in which case it will not be called at all.
+   attached once to the `'secure'` event. If `renegotiate()` returned `false`,
+   `callback` will be called in the next tick with an error, unless the
+   `tlsSocket` has been destroyed, in which case `callback` will not be called
+   at all.
 
 * Returns: {boolean} `true` if renegotiation was initiated, `false` otherwise.
 
@@ -1111,6 +1177,12 @@ being issued by trusted CA (`options.ca`).
 <!-- YAML
 added: v0.11.3
 changes:
+  - version: v12.4.0
+    pr-url: https://github.com/nodejs/node/pull/27816
+    description: The `hints` option is now supported.
+  - version: v12.2.0
+    pr-url: https://github.com/nodejs/node/pull/27497
+    description: The `enableTrace` option is now supported.
   - version: v11.8.0
     pr-url: https://github.com/nodejs/node/pull/25517
     description: The `timeout` option is supported now.
@@ -1130,19 +1202,20 @@ changes:
 -->
 
 * `options` {Object}
+  * `enableTrace`: See [`tls.createServer()`][]
   * `host` {string} Host the client should connect to. **Default:**
     `'localhost'`.
   * `port` {number} Port the client should connect to.
-  * `path` {string} Creates unix socket connection to path. If this option is
+  * `path` {string} Creates Unix socket connection to path. If this option is
     specified, `host` and `port` are ignored.
   * `socket` {stream.Duplex} Establish secure connection on a given socket
     rather than creating a new socket. Typically, this is an instance of
     [`net.Socket`][], but any `Duplex` stream is allowed.
     If this option is specified, `path`, `host` and `port` are ignored,
     except for certificate validation. Usually, a socket is already connected
-    when passed to `tls.connect()`, but it can be connected later. Note that
-    connection/disconnection/destruction of `socket` is the user's
-    responsibility, calling `tls.connect()` will not cause `net.connect()` to be
+    when passed to `tls.connect()`, but it can be connected later.
+    Connection/disconnection/destruction of `socket` is the user's
+    responsibility; calling `tls.connect()` will not cause `net.connect()` to be
     called.
   * `rejectUnauthorized` {boolean} If not `false`, the server certificate is
     verified against the list of supplied CAs. An `'error'` event is emitted if
@@ -1177,13 +1250,9 @@ changes:
     [`tls.createSecureContext()`][]. If a `secureContext` is _not_ provided, one
     will be created by passing the entire `options` object to
     `tls.createSecureContext()`.
-  * `lookup`: {Function} Custom lookup function. **Default:**
-    [`dns.lookup()`][].
-  * `timeout`: {number} If set and if a socket is created internally, will call
-    [`socket.setTimeout(timeout)`][] after the socket is created, but before it
-    starts the connection.
   * ...: [`tls.createSecureContext()`][] options that are used if the
     `secureContext` option is missing, otherwise they are ignored.
+  * ...: Any [`socket.connect()`][] option not already listed.
 * `callback` {Function}
 * Returns: {tls.TLSSocket}
 
@@ -1263,7 +1332,7 @@ argument.
 <!-- YAML
 added: v0.11.13
 changes:
-  - version: REPLACEME
+  - version: v12.0.0
     pr-url: https://github.com/nodejs/node/pull/26209
     description: TLSv1.3 support added.
   - version: v11.5.0
@@ -1313,6 +1382,7 @@ changes:
     provided.
     For PEM encoded certificates, supported types are "TRUSTED CERTIFICATE",
     "X509 CERTIFICATE", and "CERTIFICATE".
+    See also [`tls.rootCertificates`].
   * `cert` {string|string[]|Buffer|Buffer[]} Cert chains in PEM format. One cert
     chain should be provided per private key. Each cert chain should consist of
     the PEM formatted certificate for a provided private `key`, followed by the
@@ -1332,8 +1402,8 @@ changes:
     Revocation Lists).
   * `dhparam` {string|Buffer} Diffie Hellman parameters, required for
     [Perfect Forward Secrecy][]. Use `openssl dhparam` to create the parameters.
-    The key length must be greater than or equal to 1024 bits, otherwise an
-    error will be thrown. It is strongly recommended to use 2048 bits or larger
+    The key length must be greater than or equal to 1024 bits or else an error
+    will be thrown. Although 1024 bits is permissible, use 2048 bits or larger
     for stronger security. If omitted or invalid, the parameters are silently
     discarded and DHE ciphers will not be available.
   * `ecdhCurve` {string} A string describing a named curve or a colon separated
@@ -1399,19 +1469,24 @@ to `true`, other APIs that create secure contexts leave it unset.
 from `process.argv` as the default value of the `sessionIdContext` option, other
 APIs that create secure contexts have no default value.
 
-The `tls.createSecureContext()` method creates a credentials object.
+The `tls.createSecureContext()` method creates a `SecureContext` object. It is
+usable as an argument to several `tls` APIs, such as [`tls.createServer()`][]
+and [`server.addContext()`][], but has no public methods.
 
 A key is *required* for ciphers that make use of certificates. Either `key` or
 `pfx` can be used to provide it.
 
-If the 'ca' option is not given, then Node.js will use the default
-publicly trusted list of CAs as given in
-<https://hg.mozilla.org/mozilla-central/raw-file/tip/security/nss/lib/ckfw/builtins/certdata.txt>.
+If the `ca` option is not given, then Node.js will default to using
+[Mozilla's publicly trusted list of CAs][].
 
 ## tls.createServer([options][, secureConnectionListener])
 <!-- YAML
 added: v0.3.2
 changes:
+  - version: v12.3.0
+    pr-url: https://github.com/nodejs/node/pull/27665
+    description: The `options` parameter now supports `net.createServer()`
+                 options.
   - version: v9.3.0
     pr-url: https://github.com/nodejs/node/pull/14903
     description: The `options` parameter can now include `clientCertEngine`.
@@ -1435,6 +1510,10 @@ changes:
     `['hello', 'world']`. (Protocols should be ordered by their priority.)
   * `clientCertEngine` {string} Name of an OpenSSL engine which can provide the
     client certificate.
+  * `enableTrace` {boolean} If `true`, [`tls.TLSSocket.enableTrace()`][] will be
+    called on new connections. Tracing can be enabled after the secure
+    connection is established, but this option must be used to trace the secure
+    connection setup. **Default:** `false`.
   * `handshakeTimeout` {number} Abort the connection if the SSL/TLS handshake
     does not finish in the specified number of milliseconds.
     A `'tlsClientError'` is emitted on the `tls.Server` object whenever
@@ -1458,6 +1537,7 @@ changes:
     data. See [Session Resumption][] for more information.
   * ...: Any [`tls.createSecureContext()`][] option can be provided. For
     servers, the identity options (`pfx` or `key`/`cert`) are usually required.
+  * ...: Any [`net.createServer()`][] option can be provided.
 * `secureConnectionListener` {Function}
 * Returns: {tls.Server}
 
@@ -1516,6 +1596,17 @@ TLSv1.2 and below.
 ```js
 console.log(tls.getCiphers()); // ['aes128-gcm-sha256', 'aes128-sha', ...]
 ```
+
+## tls.rootCertificates
+<!-- YAML
+added: v12.3.0
+-->
+
+* {string[]}
+
+An immutable array of strings representing the root certificates (in PEM format)
+used for verifying peer certificates. This is the default value of the `ca`
+option to [`tls.createSecureContext()`].
 
 ## tls.DEFAULT_ECDH_CURVE
 <!-- YAML
@@ -1627,6 +1718,7 @@ changes:
 * `rejectUnauthorized` {boolean} If not `false` a server automatically reject
   clients with invalid certificates. Only applies when `isServer` is `true`.
 * `options`
+  * `enableTrace`: See [`tls.createServer()`][]
   * `secureContext`: A TLS context object from [`tls.createSecureContext()`][]
   * `isServer`: If `true` the TLS socket will be instantiated in server-mode.
     **Default:** `false`.
@@ -1675,20 +1767,23 @@ where `secureSocket` has the same API as `pair.cleartext`.
 [`'session'`]: #tls_event_session
 [`--tls-cipher-list`]: cli.html#cli_tls_cipher_list_list
 [`NODE_OPTIONS`]: cli.html#cli_node_options_options
+[`SSL_get_version`]: https://www.openssl.org/docs/man1.1.1/man3/SSL_get_version.html
 [`crypto.getCurves()`]: crypto.html#crypto_crypto_getcurves
-[`dns.lookup()`]: dns.html#dns_dns_lookup_hostname_options_callback
+[`net.createServer()`]: net.html#net_net_createserver_options_connectionlistener
 [`net.Server.address()`]: net.html#net_server_address
 [`net.Server`]: net.html#net_class_net_server
 [`net.Socket`]: net.html#net_class_net_socket
+[`server.addContext()`]: #tls_server_addcontext_hostname_context
 [`server.getConnections()`]: net.html#net_server_getconnections_callback
 [`server.getTicketKeys()`]: #tls_server_getticketkeys
 [`server.listen()`]: net.html#net_server_listen
 [`server.setTicketKeys()`]: #tls_server_setticketkeys_keys
-[`socket.setTimeout(timeout)`]: #net_socket_settimeout_timeout_callback
+[`socket.connect()`]: net.html#net_socket_connect_options_connectlistener
 [`tls.DEFAULT_ECDH_CURVE`]: #tls_tls_default_ecdh_curve
 [`tls.DEFAULT_MAX_VERSION`]: #tls_tls_default_max_version
 [`tls.DEFAULT_MIN_VERSION`]: #tls_tls_default_min_version
 [`tls.Server`]: #tls_class_tls_server
+[`tls.TLSSocket.enableTrace()`]: #tls_tlssocket_enabletrace
 [`tls.TLSSocket.getPeerCertificate()`]: #tls_tlssocket_getpeercertificate_detailed
 [`tls.TLSSocket.getSession()`]: #tls_tlssocket_getsession
 [`tls.TLSSocket.getTLSTicket()`]: #tls_tlssocket_gettlsticket
@@ -1698,10 +1793,12 @@ where `secureSocket` has the same API as `pair.cleartext`.
 [`tls.createSecurePair()`]: #tls_tls_createsecurepair_context_isserver_requestcert_rejectunauthorized_options
 [`tls.createServer()`]: #tls_tls_createserver_options_secureconnectionlistener
 [`tls.getCiphers()`]: #tls_tls_getciphers
+[`tls.rootCertificates`]: #tls_tls_rootcertificates
 [Chrome's 'modern cryptography' setting]: https://www.chromium.org/Home/chromium-security/education/tls#TOC-Cipher-Suites
 [DHE]: https://en.wikipedia.org/wiki/Diffie%E2%80%93Hellman_key_exchange
 [ECDHE]: https://en.wikipedia.org/wiki/Elliptic_curve_Diffie%E2%80%93Hellman
 [Forward secrecy]: https://en.wikipedia.org/wiki/Perfect_forward_secrecy
+[Mozilla's publicly trusted list of CAs]: https://hg.mozilla.org/mozilla-central/raw-file/tip/security/nss/lib/ckfw/builtins/certdata.txt
 [OCSP request]: https://en.wikipedia.org/wiki/OCSP_stapling
 [OpenSSL Options]: crypto.html#crypto_openssl_options
 [Perfect Forward Secrecy]: #tls_perfect_forward_secrecy

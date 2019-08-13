@@ -13,7 +13,7 @@ const fixtures = require('../common/fixtures');
 // This test has a dependency on the order in which the TCP connection is made,
 // and TLS server handshake completes. It assumes those server side events occur
 // before the client side write callback, which is not guaranteed by the TLS
-// API. It usally passes with TLS1.3, but TLS1.3 didn't exist at the time the
+// API. It usually passes with TLS1.3, but TLS1.3 didn't exist at the time the
 // bug existed.
 //
 // Pin the test to TLS1.2, since the test shouldn't be changed in a way that
@@ -38,7 +38,7 @@ const tlsServer = tls.createServer({ cert, key }, (socket) => {
 let netSocket;
 // plain tcp server
 const netServer = net.createServer((socket) => {
-  // if client wants to use tls
+  // If client wants to use tls
   tlsServer.emit('connection', socket);
 
   netSocket = socket;

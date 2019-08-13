@@ -29,6 +29,9 @@ const path = require('path');
 
 const backslash = /\\/g;
 
+if (!process.env.NODE_PENDING_DEPRECATION)
+  process.on('warning', common.mustNotCall());
+
 console.error('load test-module-loading.js');
 
 assert.strictEqual(require.main.id, '.');
@@ -105,6 +108,15 @@ assert.strictEqual(require('../fixtures/packages/index').ok, 'ok');
 assert.strictEqual(require('../fixtures/packages/main').ok, 'ok');
 assert.strictEqual(require('../fixtures/packages/main-index').ok, 'ok');
 assert.strictEqual(require('../fixtures/packages/missing-main').ok, 'ok');
+assert.throws(
+  () => require('../fixtures/packages/missing-main-no-index'),
+  {
+    code: 'MODULE_NOT_FOUND',
+    message: /packages[/\\]missing-main-no-index[/\\]doesnotexist\.js'\. Please.+package\.json.+valid "main"/,
+    path: /fixtures[/\\]packages[/\\]missing-main-no-index[/\\]package\.json/,
+    requestPath: /^\.\.[/\\]fixtures[/\\]packages[/\\]missing-main-no-index$/
+  }
+);
 
 assert.throws(
   function() { require('../fixtures/packages/unparseable'); },
@@ -189,27 +201,33 @@ assert.throws(
 
   assert.strictEqual(require(`${loadOrder}file1`).file1, 'file1');
   assert.strictEqual(require(`${loadOrder}file2`).file2, 'file2.js');
-  try {
-    require(`${loadOrder}file3`);
-  } catch (e) {
-    // Not a real .node module, but we know we require'd the right thing.
-    if (common.isOpenBSD) // OpenBSD errors with non-ELF object error
-      assert.ok(/File not an ELF object/.test(e.message.replace(backslash, '/')));
-    else
-      assert.ok(/file3\.node/.test(e.message.replace(backslash, '/')));
-  }
+  assert.throws(
+    () => require(`${loadOrder}file3`),
+    (e) => {
+      // Not a real .node module, but we know we require'd the right thing.
+      if (common.isOpenBSD) { // OpenBSD errors with non-ELF object error
+        assert.ok(/File not an ELF object/.test(e.message.replace(backslash, '/')));
+      } else {
+        assert.ok(/file3\.node/.test(e.message.replace(backslash, '/')));
+      }
+      return true;
+    }
+  );
 
   assert.strictEqual(require(`${loadOrder}file4`).file4, 'file4.reg');
   assert.strictEqual(require(`${loadOrder}file5`).file5, 'file5.reg2');
   assert.strictEqual(require(`${loadOrder}file6`).file6, 'file6/index.js');
-  try {
-    require(`${loadOrder}file7`);
-  } catch (e) {
-    if (common.isOpenBSD)
-      assert.ok(/File not an ELF object/.test(e.message.replace(backslash, '/')));
-    else
-      assert.ok(/file7\/index\.node/.test(e.message.replace(backslash, '/')));
-  }
+  assert.throws(
+    () => require(`${loadOrder}file7`),
+    (e) => {
+      if (common.isOpenBSD) {
+        assert.ok(/File not an ELF object/.test(e.message.replace(backslash, '/')));
+      } else {
+        assert.ok(/file7\/index\.node/.test(e.message.replace(backslash, '/')));
+      }
+      return true;
+    }
+  );
 
   assert.strictEqual(require(`${loadOrder}file8`).file8, 'file8/index.reg');
   assert.strictEqual(require(`${loadOrder}file9`).file9, 'file9/index.reg2');
@@ -333,6 +351,13 @@ process.on('exit', function() {
 // See https://github.com/nodejs/node-v0.x-archive/issues/1440.
 assert.strictEqual(require('../fixtures/utf8-bom.js'), 42);
 assert.strictEqual(require('../fixtures/utf8-bom.json'), 42);
+
+// Loading files with BOM + shebang.
+// See https://github.com/nodejs/node/issues/27767
+assert.throws(() => {
+  require('../fixtures/utf8-bom-shebang-shebang.js');
+}, { name: 'SyntaxError' });
+assert.strictEqual(require('../fixtures/utf8-shebang-bom.js'), 42);
 
 // Error on the first line of a module should
 // have the correct line number

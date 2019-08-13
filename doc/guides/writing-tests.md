@@ -390,7 +390,7 @@ Next add the test to the `sources` in the `cctest` target in node.gyp:
 ],
 ```
 
-Note that the only sources that should be included in the cctest target are
+The only sources that should be included in the cctest target are
 actual test or helper source files. There might be a need to include specific
 object files that are compiled by the `node` target and this can be done by
 adding them to the `libraries` section in the cctest target.
@@ -423,6 +423,9 @@ will depend on what is being tested if this is required or not.
 
 To generate a test coverage report, see the
 [Test Coverage section of the Building guide][].
+
+Nightly coverage reports for the Node.js master branch are available at
+https://coverage.nodejs.org/.
 
 [ASCII]: http://man7.org/linux/man-pages/man7/ascii.7.html
 [Google Test]: https://github.com/google/googletest

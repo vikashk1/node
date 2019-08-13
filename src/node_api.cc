@@ -1,11 +1,13 @@
-#include <node_buffer.h>
-#include "env.h"
+#include "env-inl.h"
 #define NAPI_EXPERIMENTAL
 #include "js_native_api_v8.h"
 #include "node_api.h"
 #include "node_binding.h"
+#include "node_buffer.h"
 #include "node_errors.h"
 #include "node_internals.h"
+#include "threadpoolwork-inl.h"
+#include "util-inl.h"
 
 #include <memory>
 
@@ -30,62 +32,55 @@ namespace v8impl {
 
 namespace {
 
-class BufferFinalizer: private Finalizer {
+class BufferFinalizer : private Finalizer {
  public:
   // node::Buffer::FreeCallback
   static void FinalizeBufferCallback(char* data, void* hint) {
-    BufferFinalizer* finalizer = static_cast<BufferFinalizer*>(hint);
-    if (finalizer->_finalize_callback != nullptr) {
-      NapiCallIntoModuleThrow(finalizer->_env, [&]() {
-        finalizer->_finalize_callback(
-          finalizer->_env,
-          data,
-          finalizer->_finalize_hint);
-      });
-    }
+    std::unique_ptr<BufferFinalizer, Deleter> finalizer{
+        static_cast<BufferFinalizer*>(hint)};
+    finalizer->_finalize_data = data;
 
-    Delete(finalizer);
+    node::Environment* node_env =
+        static_cast<node_napi_env>(finalizer->_env)->node_env();
+    node_env->SetImmediate(
+        [finalizer = std::move(finalizer)](node::Environment* env) {
+      if (finalizer->_finalize_callback == nullptr) return;
+
+      v8::HandleScope handle_scope(finalizer->_env->isolate);
+      v8::Context::Scope context_scope(finalizer->_env->context());
+
+      finalizer->_env->CallIntoModuleThrow([&](napi_env env) {
+        finalizer->_finalize_callback(
+            env,
+            finalizer->_finalize_data,
+            finalizer->_finalize_hint);
+      });
+    });
   }
+
+  struct Deleter {
+    void operator()(BufferFinalizer* finalizer) {
+      Finalizer::Delete(finalizer);
+    }
+  };
 };
 
-static inline napi_env GetEnv(v8::Local<v8::Context> context) {
+static inline napi_env NewEnv(v8::Local<v8::Context> context) {
   node_napi_env result;
 
-  auto isolate = context->GetIsolate();
-  auto global = context->Global();
-
-  // In the case of the string for which we grab the private and the value of
-  // the private on the global object we can call .ToLocalChecked() directly
-  // because we need to stop hard if either of them is empty.
-  //
-  // Re https://github.com/nodejs/node/pull/14217#discussion_r128775149
-  auto value = global->GetPrivate(context, NAPI_PRIVATE_KEY(context, env))
-      .ToLocalChecked();
-
-  if (value->IsExternal()) {
-    result = static_cast<node_napi_env>(value.As<v8::External>()->Value());
-  } else {
-    result = new node_napi_env__(context);
-    auto external = v8::External::New(isolate, result);
-
-    // We must also stop hard if the result of assigning the env to the global
-    // is either nothing or false.
-    CHECK(global->SetPrivate(context, NAPI_PRIVATE_KEY(context, env), external)
-        .FromJust());
-
-    // TODO(addaleax): There was previously code that tried to delete the
-    // napi_env when its v8::Context was garbage collected;
-    // However, as long as N-API addons using this napi_env are in place,
-    // the Context needs to be accessible and alive.
-    // Ideally, we'd want an on-addon-unload hook that takes care of this
-    // once all N-API addons using this napi_env are unloaded.
-    // For now, a per-Environment cleanup hook is the best we can do.
-    result->node_env()->AddCleanupHook(
-        [](void* arg) {
-          static_cast<napi_env>(arg)->Unref();
-        },
-        static_cast<void*>(result));
-  }
+  result = new node_napi_env__(context);
+  // TODO(addaleax): There was previously code that tried to delete the
+  // napi_env when its v8::Context was garbage collected;
+  // However, as long as N-API addons using this napi_env are in place,
+  // the Context needs to be accessible and alive.
+  // Ideally, we'd want an on-addon-unload hook that takes care of this
+  // once all N-API addons using this napi_env are unloaded.
+  // For now, a per-Environment cleanup hook is the best we can do.
+  result->node_env()->AddCleanupHook(
+      [](void* arg) {
+        static_cast<napi_env>(arg)->Unref();
+      },
+      static_cast<void*>(result));
 
   return result;
 }
@@ -104,7 +99,7 @@ static inline void trigger_fatal_exception(
     napi_env env, v8::Local<v8::Value> local_err) {
   v8::Local<v8::Message> local_msg =
     v8::Exception::CreateMessage(env->isolate, local_err);
-  node::FatalException(env->isolate, local_err, local_msg);
+  node::errors::TriggerUncaughtException(env->isolate, local_err, local_msg);
 }
 
 class ThreadSafeFunction : public node::AsyncResource {
@@ -308,12 +303,15 @@ class ThreadSafeFunction : public node::AsyncResource {
                                "ERR_NAPI_TSFN_STOP_IDLE_LOOP",
                                "Failed to stop the idle loop") == napi_ok);
       } else {
-        v8::Local<v8::Function> js_cb =
+        napi_value js_callback = nullptr;
+        if (!ref.IsEmpty()) {
+          v8::Local<v8::Function> js_cb =
             v8::Local<v8::Function>::New(env->isolate, ref);
-        call_js_cb(env,
-                   v8impl::JsValueFromV8LocalValue(js_cb),
-                   context,
-                   data);
+          js_callback = v8impl::JsValueFromV8LocalValue(js_cb);
+        }
+        env->CallIntoModuleThrow([&](napi_env env) {
+          call_js_cb(env, js_callback, context, data);
+        });
       }
     }
   }
@@ -332,7 +330,9 @@ class ThreadSafeFunction : public node::AsyncResource {
     v8::HandleScope scope(env->isolate);
     if (finalize_cb) {
       CallbackScope cb_scope(this);
-      finalize_cb(env, finalize_data, context);
+      env->CallIntoModuleThrow([&](napi_env env) {
+        finalize_cb(env, finalize_data, context);
+      });
     }
     EmptyQueueAndDelete();
   }
@@ -465,10 +465,10 @@ void napi_module_register_by_symbol(v8::Local<v8::Object> exports,
 
   // Create a new napi_env for this module or reference one if a pre-existing
   // one is found.
-  napi_env env = v8impl::GetEnv(context);
+  napi_env env = v8impl::NewEnv(context);
 
   napi_value _exports;
-  NapiCallIntoModuleThrow(env, [&]() {
+  env->CallIntoModuleThrow([&](napi_env env) {
     _exports = init(env, v8impl::JsValueFromV8LocalValue(exports));
   });
 
@@ -632,10 +632,11 @@ napi_status napi_async_destroy(napi_env env,
   CHECK_ENV(env);
   CHECK_ARG(env, async_context);
 
-  v8::Isolate* isolate = env->isolate;
   node::async_context* node_async_context =
       reinterpret_cast<node::async_context*>(async_context);
-  node::EmitAsyncDestroy(isolate, *node_async_context);
+  node::EmitAsyncDestroy(
+      reinterpret_cast<node_napi_env>(env)->node_env(),
+      *node_async_context);
 
   delete node_async_context;
 
@@ -841,7 +842,7 @@ class Work : public node::AsyncResource, public node::ThreadPoolWork {
       _complete(complete) {
   }
 
-  ~Work() override { }
+  ~Work() override = default;
 
  public:
   static Work* New(node_napi_env env,
@@ -872,15 +873,9 @@ class Work : public node::AsyncResource, public node::ThreadPoolWork {
 
     CallbackScope callback_scope(this);
 
-    // We have to back up the env here because the `NAPI_CALL_INTO_MODULE` macro
-    // makes use of it after the call into the module completes, but the module
-    // may have deallocated **this**, and along with it the place where _env is
-    // stored.
-    napi_env env = _env;
-
-    NapiCallIntoModule(env, [&]() {
-      _complete(_env, ConvertUVErrorCode(status), _data);
-    }, [env](v8::Local<v8::Value> local_err) {
+    _env->CallIntoModule([&](napi_env env) {
+      _complete(env, ConvertUVErrorCode(status), _data);
+    }, [](napi_env env, v8::Local<v8::Value> local_err) {
       // If there was an unhandled exception in the complete callback,
       // report it as a fatal exception. (There is no JavaScript on the
       // callstack that can possibly handle it.)
@@ -1002,7 +997,6 @@ napi_create_threadsafe_function(napi_env env,
                                 napi_threadsafe_function_call_js call_js_cb,
                                 napi_threadsafe_function* result) {
   CHECK_ENV(env);
-  CHECK_ARG(env, func);
   CHECK_ARG(env, async_resource_name);
   RETURN_STATUS_IF_FALSE(env, initial_thread_count > 0, napi_invalid_arg);
   CHECK_ARG(env, result);
@@ -1010,7 +1004,11 @@ napi_create_threadsafe_function(napi_env env,
   napi_status status = napi_ok;
 
   v8::Local<v8::Function> v8_func;
-  CHECK_TO_FUNCTION(env, v8_func, func);
+  if (func == nullptr) {
+    CHECK_ARG(env, call_js_cb);
+  } else {
+    CHECK_TO_FUNCTION(env, v8_func, func);
+  }
 
   v8::Local<v8::Context> v8_context = env->context();
 

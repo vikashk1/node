@@ -24,10 +24,10 @@
 
 #if defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS
 
-#include "node_persistent.h"
 #include "v8.h"
 
 #include <cassert>
+#include <climits>  // PATH_MAX
 #include <csignal>
 #include <cstddef>
 #include <cstdio>
@@ -43,6 +43,16 @@
 #include <utility>
 
 namespace node {
+
+// Maybe remove kPathSeparator when cpp17 is ready
+#ifdef _WIN32
+    constexpr char kPathSeparator = '\\';
+/* MAX_PATH is in characters, not bytes. Make sure we have enough headroom. */
+#define PATH_MAX_BYTES (MAX_PATH * 4)
+#else
+    constexpr char kPathSeparator = '/';
+#define PATH_MAX_BYTES (PATH_MAX)
+#endif
 
 // These should be used in our code as opposed to the native
 // versions as they abstract out some platform and or
@@ -106,6 +116,16 @@ void DumpBacktrace(FILE* fp);
 
 #define ABORT() node::Abort()
 
+#define ERROR_AND_ABORT(expr)                                                 \
+  do {                                                                        \
+    /* Make sure that this struct does not end up in inline code, but      */ \
+    /* rather in a read-only data section when modifying this code.        */ \
+    static const node::AssertionInfo args = {                                 \
+      __FILE__ ":" STRINGIFY(__LINE__), #expr, PRETTY_FUNCTION_NAME           \
+    };                                                                        \
+    node::Assert(args);                                                       \
+  } while (0)
+
 #ifdef __GNUC__
 #define LIKELY(expr) __builtin_expect(!!(expr), 1)
 #define UNLIKELY(expr) __builtin_expect(!!(expr), 0)
@@ -122,12 +142,7 @@ void DumpBacktrace(FILE* fp);
 #define CHECK(expr)                                                           \
   do {                                                                        \
     if (UNLIKELY(!(expr))) {                                                  \
-      /* Make sure that this struct does not end up in inline code, but    */ \
-      /* rather in a read-only data section when modifying this code.      */ \
-      static const node::AssertionInfo args = {                               \
-        __FILE__ ":" STRINGIFY(__LINE__), #expr, PRETTY_FUNCTION_NAME         \
-      };                                                                      \
-      node::Assert(args);                                                     \
+      ERROR_AND_ABORT(expr);                                                  \
     }                                                                         \
   } while (0)
 
@@ -166,7 +181,8 @@ void DumpBacktrace(FILE* fp);
 #endif
 
 
-#define UNREACHABLE() ABORT()
+#define UNREACHABLE(...)                                                      \
+  ERROR_AND_ABORT("Unreachable code reached" __VA_OPT__(": ") __VA_ARGS__)
 
 // TAILQ-style intrusive list node.
 template <typename T>
@@ -283,6 +299,10 @@ inline void SwapBytes64(char* data, size_t nbytes);
 // tolower() is locale-sensitive.  Use ToLower() instead.
 inline char ToLower(char c);
 inline std::string ToLower(const std::string& in);
+
+// toupper() is locale-sensitive.  Use ToUpper() instead.
+inline char ToUpper(char c);
+inline std::string ToUpper(const std::string& in);
 
 // strcasecmp() is locale-sensitive.  Use StringEqualNoCase() instead.
 inline bool StringEqualNoCase(const char* a, const char* b);
@@ -423,9 +443,10 @@ class MaybeStackBuffer {
 template <typename T, size_t kStackStorageSize = 64>
 class ArrayBufferViewContents {
  public:
-  ArrayBufferViewContents() {}
+  ArrayBufferViewContents() = default;
 
   explicit inline ArrayBufferViewContents(v8::Local<v8::Value> value);
+  explicit inline ArrayBufferViewContents(v8::Local<v8::Object> value);
   explicit inline ArrayBufferViewContents(v8::Local<v8::ArrayBufferView> abv);
   inline void Read(v8::Local<v8::ArrayBufferView> abv);
 
@@ -578,7 +599,7 @@ inline v8::MaybeLocal<v8::Value> ToV8Value(v8::Local<v8::Context> context,
   do {                                                                         \
     obj->DefineOwnProperty(                                                    \
            context, FIXED_ONE_BYTE_STRING(isolate, name), value, v8::ReadOnly) \
-        .FromJust();                                                           \
+        .Check();                                                              \
   } while (0)
 
 #define READONLY_DONT_ENUM_PROPERTY(obj, name, var)                            \
@@ -588,7 +609,7 @@ inline v8::MaybeLocal<v8::Value> ToV8Value(v8::Local<v8::Context> context,
            OneByteString(isolate, name),                                       \
            var,                                                                \
            static_cast<v8::PropertyAttribute>(v8::ReadOnly | v8::DontEnum))    \
-        .FromJust();                                                           \
+        .Check();                                                              \
   } while (0)
 
 #define READONLY_FALSE_PROPERTY(obj, name)                                     \
@@ -617,7 +638,7 @@ inline v8::MaybeLocal<v8::Value> ToV8Value(v8::Local<v8::Context> context,
                             constant_name,                                     \
                             constant_value,                                    \
                             constant_attributes)                               \
-        .FromJust();                                                           \
+        .Check();                                                              \
   } while (0)
 
 enum Endianness {
@@ -663,6 +684,44 @@ class SlicedArguments : public MaybeStackBuffer<v8::Local<v8::Value>> {
  public:
   inline explicit SlicedArguments(
       const v8::FunctionCallbackInfo<v8::Value>& args, size_t start = 0);
+};
+
+// Convert a v8::PersistentBase, e.g. v8::Global, to a Local, with an extra
+// optimization for strong persistent handles.
+class PersistentToLocal {
+ public:
+  // If persistent.IsWeak() == false, then do not call persistent.Reset()
+  // while the returned Local<T> is still in scope, it will destroy the
+  // reference to the object.
+  template <class TypeName>
+  static inline v8::Local<TypeName> Default(
+      v8::Isolate* isolate,
+      const v8::PersistentBase<TypeName>& persistent) {
+    if (persistent.IsWeak()) {
+      return PersistentToLocal::Weak(isolate, persistent);
+    } else {
+      return PersistentToLocal::Strong(persistent);
+    }
+  }
+
+  // Unchecked conversion from a non-weak Persistent<T> to Local<T>,
+  // use with care!
+  //
+  // Do not call persistent.Reset() while the returned Local<T> is still in
+  // scope, it will destroy the reference to the object.
+  template <class TypeName>
+  static inline v8::Local<TypeName> Strong(
+      const v8::PersistentBase<TypeName>& persistent) {
+    return *reinterpret_cast<v8::Local<TypeName>*>(
+        const_cast<v8::PersistentBase<TypeName>*>(&persistent));
+  }
+
+  template <class TypeName>
+  static inline v8::Local<TypeName> Weak(
+      v8::Isolate* isolate,
+      const v8::PersistentBase<TypeName>& persistent) {
+    return v8::Local<TypeName>::New(isolate, persistent);
+  }
 };
 
 }  // namespace node

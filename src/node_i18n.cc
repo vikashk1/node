@@ -45,7 +45,6 @@
 #if defined(NODE_HAVE_I18N_SUPPORT)
 
 #include "base_object-inl.h"
-#include "env-inl.h"
 #include "node.h"
 #include "node_buffer.h"
 #include "node_errors.h"
@@ -152,7 +151,7 @@ class ConverterObject : public BaseObject, Converter {
     CONVERTER_FLAGS_IGNORE_BOM = 0x4
   };
 
-  ~ConverterObject() override {}
+  ~ConverterObject() override = default;
 
   static void Has(const FunctionCallbackInfo<Value>& args) {
     Environment* env = Environment::GetCurrent(args);
@@ -206,14 +205,13 @@ class ConverterObject : public BaseObject, Converter {
 
     ConverterObject* converter;
     ASSIGN_OR_RETURN_UNWRAP(&converter, args[0].As<Object>());
-    SPREAD_BUFFER_ARG(args[1], input_obj);
+    ArrayBufferViewContents<char> input(args[1]);
     int flags = args[2]->Uint32Value(env->context()).ToChecked();
 
     UErrorCode status = U_ZERO_ERROR;
     MaybeStackBuffer<UChar> result;
     MaybeLocal<Object> ret;
-    size_t limit = ucnv_getMinCharSize(converter->conv) *
-                   input_obj_length;
+    size_t limit = ucnv_getMinCharSize(converter->conv) * input.length();
     if (limit > 0)
       result.AllocateSufficientStorage(limit);
 
@@ -226,8 +224,8 @@ class ConverterObject : public BaseObject, Converter {
       }
     });
 
-    const char* source = input_obj_data;
-    size_t source_length = input_obj_length;
+    const char* source = input.data();
+    size_t source_length = input.length();
 
     if (converter->unicode_ && !converter->ignoreBOM_ && !converter->bomSeen_) {
       int32_t bomOffset = 0;
@@ -456,8 +454,7 @@ void Transcode(const FunctionCallbackInfo<Value>&args) {
   UErrorCode status = U_ZERO_ERROR;
   MaybeLocal<Object> result;
 
-  CHECK(Buffer::HasInstance(args[0]));
-  SPREAD_BUFFER_ARG(args[0], ts_obj);
+  ArrayBufferViewContents<char> input(args[0]);
   const enum encoding fromEncoding = ParseEncoding(isolate, args[1], BUFFER);
   const enum encoding toEncoding = ParseEncoding(isolate, args[2], BUFFER);
 
@@ -491,7 +488,7 @@ void Transcode(const FunctionCallbackInfo<Value>&args) {
     }
 
     result = tfn(env, EncodingName(fromEncoding), EncodingName(toEncoding),
-                 ts_obj_data, ts_obj_length, &status);
+                 input.data(), input.length(), &status);
   } else {
     status = U_ILLEGAL_ARGUMENT_ERROR;
   }
@@ -658,7 +655,7 @@ static void ToUnicode(const FunctionCallbackInfo<Value>& args) {
   int32_t len = ToUnicode(&buf, *val, val.length());
 
   if (len < 0) {
-    return env->ThrowError("Cannot convert name to Unicode");
+    return THROW_ERR_INVALID_ARG_VALUE(env, "Cannot convert name to Unicode");
   }
 
   args.GetReturnValue().Set(
@@ -681,7 +678,7 @@ static void ToASCII(const FunctionCallbackInfo<Value>& args) {
   int32_t len = ToASCII(&buf, *val, val.length(), mode);
 
   if (len < 0) {
-    return env->ThrowError("Cannot convert name to ASCII");
+    return THROW_ERR_INVALID_ARG_VALUE(env, "Cannot convert name to ASCII");
   }
 
   args.GetReturnValue().Set(

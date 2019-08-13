@@ -1,5 +1,9 @@
 ## Test-specific linter rules
 
+env:
+  node: true
+  es6: true
+
 rules:
   # ECMAScript 6
   # http://eslint.org/docs/rules/#ecmascript-6
@@ -17,7 +21,10 @@ rules:
   node-core/inspector-check: error
   node-core/number-isnan: error
   ## common module is mandatory in tests
-  node-core/required-modules: [error, common]
+  node-core/required-modules:
+    - error
+    - common: 'common(/index\.(m)?js)?$'
+  node-core/require-common-first: error
   node-core/no-duplicate-requires: off
 
 # Global scoped methods and vars

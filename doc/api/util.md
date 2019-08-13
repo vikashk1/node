@@ -187,11 +187,11 @@ changes:
     pr-url: https://github.com/nodejs/node/pull/23708
     description: The `%d`, `%f` and `%i` specifiers now support Symbols
                  properly.
-  - version: REPLACEME
+  - version: v12.0.0
     pr-url: https://github.com/nodejs/node/pull/23162
     description: The `format` argument is now only taken as such if it actually
                  contains format specifiers.
-  - version: REPLACEME
+  - version: v12.0.0
     pr-url: https://github.com/nodejs/node/pull/23162
     description: If the `format` argument is not a format string, the output
                  string's formatting is no longer dependent on the type of the
@@ -220,15 +220,19 @@ as a `printf`-like format string which can contain zero or more format
 specifiers. Each specifier is replaced with the converted value from the
 corresponding argument. Supported specifiers are:
 
-* `%s` - `String`.
-* `%d` - `Number` (integer or floating point value) or `BigInt`.
-* `%i` - Integer or `BigInt`.
-* `%f` - Floating point value.
-* `%j` - JSON. Replaced with the string `'[Circular]'` if the argument
-contains circular references.
-* `%o` - `Object`. A string representation of an object
-  with generic JavaScript object formatting.
-  Similar to `util.inspect()` with options
+* `%s` - `String` will be used to convert all values except `BigInt`, `Object`
+  and `-0`. `BigInt` values will be represented with an `n` and Objects that
+  have no user defined `toString` function are inspected using `util.inspect()`
+  with options `{ depth: 0, colors: false, compact: 3 }`.
+* `%d` - `Number` will be used to convert all values except `BigInt` and
+  `Symbol`.
+* `%i` - `parseInt(value, 10)` is used for all values except `BigInt` and
+  `Symbol`.
+* `%f` - `parseFloat(value)` is used for all values expect `Symbol`.
+* `%j` - JSON. Replaced with the string `'[Circular]'` if the argument contains
+  circular references.
+* `%o` - `Object`. A string representation of an object with generic JavaScript
+  object formatting. Similar to `util.inspect()` with options
   `{ showHidden: true, showProxy: true }`. This will show the full object
   including non-enumerable properties and proxies.
 * `%O` - `Object`. A string representation of an object with generic JavaScript
@@ -272,10 +276,9 @@ util.format('%% %s');
 // Returns: '%% %s'
 ```
 
-Please note that `util.format()` is a synchronous method that is mainly
-intended as a debugging tool. Some input values can have a significant
-performance overhead that can block the event loop. Use this function
-with care and never in a hot code path.
+`util.format()` is a synchronous method that is intended as a debugging tool.
+Some input values can have a significant performance overhead that can block the
+event loop. Use this function with care and never in a hot code path.
 
 ## util.formatWithOptions(inspectOptions, format[, ...args])
 <!-- YAML
@@ -388,10 +391,17 @@ stream.write('With ES6');
 <!-- YAML
 added: v0.3.0
 changes:
+  - version: REPLACEME
+    pr-url: https://github.com/nodejs/node/pull/27685
+    description: Circular references now include a marker to the reference.
+  - version: v12.0.0
+    pr-url: https://github.com/nodejs/node/pull/27109
+    description: The `compact` options default is changed to `3` and the
+                 `breakLength` options default is changed to `80`.
   - version: v11.11.0
     pr-url: https://github.com/nodejs/node/pull/26269
     description: The `compact` option accepts numbers for a new output mode.
-  - version: REPLACEME
+  - version: v12.0.0
     pr-url: https://github.com/nodejs/node/pull/24971
     description: Internal properties no longer appear in the context argument
                  of a custom inspection function.
@@ -461,16 +471,17 @@ changes:
     [`TypedArray`][], [`WeakMap`][] and [`WeakSet`][] elements to include when
     formatting. Set to `null` or `Infinity` to show all elements. Set to `0` or
     negative to show no elements. **Default:** `100`.
-  * `breakLength` {integer} The length at which an object's keys are split
-    across multiple lines. Set to `Infinity` to format an object as a single
-    line. **Default:** `60` for legacy compatibility.
+  * `breakLength` {integer} The length at which input values are split across
+    multiple lines. Set to `Infinity` to format the input as a single line
+    (in combination with `compact` set to `true` or any number >= `1`).
+    **Default:** `80`.
   * `compact` {boolean|integer} Setting this to `false` causes each object key
     to be displayed on a new line. It will also add new lines to text that is
     longer than `breakLength`. If set to a number, the most `n` inner elements
     are united on a single line as long as all properties fit into
-    `breakLength`. Short array elements are also grouped together. Note that no
+    `breakLength`. Short array elements are also grouped together. No
     text will be reduced below 16 characters, no matter the `breakLength` size.
-    For more information, see the example below. **Default:** `true`.
+    For more information, see the example below. **Default:** `3`.
   * `sorted` {boolean|Function} If set to `true` or a function, all properties
     of an object, and `Set` and `Map` entries are sorted in the resulting
     string. If set to `true` the [default sort][] is used. If set to a function,
@@ -505,6 +516,24 @@ util.inspect(new Bar()); // 'Bar {}'
 util.inspect(baz);       // '[foo] {}'
 ```
 
+Circular references point to their anchor by using a reference index:
+
+```js
+const { inspect } = require('util');
+
+const obj = {};
+obj.a = [obj];
+obj.b = {};
+obj.b.inner = obj.b;
+obj.b.obj = obj;
+
+console.log(inspect(obj));
+// <ref *1> {
+//   a: [ [Circular *1] ],
+//   b: <ref *2> { inner: [Circular *2], obj: [Circular *1] }
+// }
+```
+
 The following example inspects all properties of the `util` object:
 
 ```js
@@ -527,8 +556,6 @@ const o = {
   b: new Map([['za', 1], ['zb', 'test']])
 };
 console.log(util.inspect(o, { compact: true, depth: 5, breakLength: 80 }));
-
-// This will print
 
 // { a:
 //   [ 1,
@@ -631,22 +658,25 @@ via the `util.inspect.styles` and `util.inspect.colors` properties.
 
 The default styles and associated colors are:
 
- * `number` - `yellow`
- * `boolean` - `yellow`
- * `string` - `green`
- * `date` - `magenta`
- * `regexp` - `red`
- * `null` - `bold`
- * `undefined` - `grey`
- * `special` - `cyan` (only applied to functions at this time)
- * `name` - (no styling)
+* `bigint` - `yellow`
+* `boolean` - `yellow`
+* `date` - `magenta`
+* `module` - `underline`
+* `name` - (no styling)
+* `null` - `bold`
+* `number` - `yellow`
+* `regexp` - `red`
+* `special` - `cyan` (e.g., `Proxies`)
+* `string` - `green`
+* `symbol` - `green`
+* `undefined` - `grey`
 
 The predefined color codes are: `white`, `grey`, `black`, `blue`, `cyan`,
 `green`, `magenta`, `red` and `yellow`. There are also `bold`, `italic`,
 `underline` and `inverse` codes.
 
 Color styling uses ANSI control codes that may not be supported on all
-terminals.
+terminals. To verify color support use [`tty.hasColors()`][].
 
 ### Custom inspection functions on Objects
 
@@ -758,7 +788,7 @@ option properties directly is also supported.
 const util = require('util');
 const arr = Array(101).fill(0);
 
-console.log(arr); // logs the truncated array
+console.log(arr); // Logs the truncated array
 util.inspect.defaultOptions.maxArrayLength = null;
 console.log(arr); // logs the full array
 ```
@@ -1126,7 +1156,7 @@ added: v10.0.0
 * Returns: {boolean}
 
 Returns `true` if the value is an [async function][].
-Note that this only reports back what the JavaScript engine is seeing;
+This only reports back what the JavaScript engine is seeing;
 in particular, the return value may not match the original source code if
 a transpilation tool was used.
 
@@ -1289,7 +1319,7 @@ added: v10.0.0
 * Returns: {boolean}
 
 Returns `true` if the value is a generator function.
-Note that this only reports back what the JavaScript engine is seeing;
+This only reports back what the JavaScript engine is seeing;
 in particular, the return value may not match the original source code if
 a transpilation tool was used.
 
@@ -1308,7 +1338,7 @@ added: v10.0.0
 
 Returns `true` if the value is a generator object as returned from a
 built-in generator function.
-Note that this only reports back what the JavaScript engine is seeing;
+This only reports back what the JavaScript engine is seeing;
 in particular, the return value may not match the original source code if
 a transpilation tool was used.
 
@@ -1846,7 +1876,7 @@ util.isError({ name: 'Error', message: 'an error occurred' });
 // Returns: false
 ```
 
-Note that this method relies on `Object.prototype.toString()` behavior. It is
+This method relies on `Object.prototype.toString()` behavior. It is
 possible to obtain an incorrect result when the `object` argument manipulates
 `@@toStringTag`.
 
@@ -2183,6 +2213,7 @@ util.log('Timestamped message.');
 [`assert.deepStrictEqual()`]: assert.html#assert_assert_deepstrictequal_actual_expected_message
 [`console.error()`]: console.html#console_console_error_data_args
 [`target` and `handler`]: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Proxy#Terminology
+[`tty.hasColors()`]: tty.html#tty_writestream_hascolors_count_env
 [`util.format()`]: #util_util_format_format_args
 [`util.inspect()`]: #util_util_inspect_object_options
 [`util.promisify()`]: #util_util_promisify_original

@@ -1,6 +1,8 @@
 #include "base_object-inl.h"
 #include "inspector_agent.h"
 #include "inspector_io.h"
+#include "memory_tracker-inl.h"
+#include "util-inl.h"
 #include "v8.h"
 #include "v8-inspector.h"
 
@@ -15,6 +17,7 @@ using v8::Context;
 using v8::Function;
 using v8::FunctionCallbackInfo;
 using v8::FunctionTemplate;
+using v8::Global;
 using v8::HandleScope;
 using v8::Isolate;
 using v8::Local;
@@ -116,7 +119,7 @@ class JSBindingsConnection : public AsyncWrap {
 
  private:
   std::unique_ptr<InspectorSession> session_;
-  Persistent<Function> callback_;
+  Global<Function> callback_;
 };
 
 static bool InspectorEnabled(Environment* env) {
@@ -234,7 +237,6 @@ void IsEnabled(const FunctionCallbackInfo<Value>& args) {
 void Open(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
   Agent* agent = env->inspector_agent();
-  bool wait_for_connect = false;
 
   if (args.Length() > 0 && args[0]->IsUint32()) {
     uint32_t port = args[0].As<Uint32>()->Value();
@@ -246,34 +248,29 @@ void Open(const FunctionCallbackInfo<Value>& args) {
     agent->host_port()->set_host(*host);
   }
 
-  if (args.Length() > 2 && args[2]->IsBoolean()) {
-    wait_for_connect = args[2]->BooleanValue(args.GetIsolate());
-  }
   agent->StartIoThread();
-  if (wait_for_connect)
+}
+
+void WaitForDebugger(const FunctionCallbackInfo<Value>& args) {
+  Environment* env = Environment::GetCurrent(args);
+  Agent* agent = env->inspector_agent();
+  if (agent->IsActive())
     agent->WaitForConnect();
+  args.GetReturnValue().Set(agent->IsActive());
 }
 
 void Url(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
-  Agent* agent = env->inspector_agent();
-  InspectorIo* io = agent->io();
-
-  if (!io) return;
-
-  std::vector<std::string> ids = io->GetTargetIds();
-
-  if (ids.empty()) return;
-
-  std::string url = FormatWsAddress(io->host(), io->port(), ids[0], true);
+  std::string url = env->inspector_agent()->GetWsUrl();
+  if (url.length() == 0) {
+    return;
+  }
   args.GetReturnValue().Set(OneByteString(env->isolate(), url.c_str()));
 }
 
 void Initialize(Local<Object> target, Local<Value> unused,
                 Local<Context> context, void* priv) {
   Environment* env = Environment::GetCurrent(context);
-
-  Agent* agent = env->inspector_agent();
 
   v8::Local<v8::Function> consoleCallFunc =
       env->NewFunctionTemplate(InspectorConsoleCall, v8::Local<v8::Signature>(),
@@ -282,15 +279,15 @@ void Initialize(Local<Object> target, Local<Value> unused,
           ->GetFunction(context)
           .ToLocalChecked();
   auto name_string = FIXED_ONE_BYTE_STRING(env->isolate(), "consoleCall");
-  target->Set(context, name_string, consoleCallFunc).FromJust();
+  target->Set(context, name_string, consoleCallFunc).Check();
   consoleCallFunc->SetName(name_string);
 
   env->SetMethod(
       target, "setConsoleExtensionInstaller", SetConsoleExtensionInstaller);
-  if (agent->WillWaitForConnect())
-    env->SetMethod(target, "callAndPauseOnStart", CallAndPauseOnStart);
+  env->SetMethod(target, "callAndPauseOnStart", CallAndPauseOnStart);
   env->SetMethod(target, "open", Open);
   env->SetMethodNoSideEffect(target, "url", Url);
+  env->SetMethod(target, "waitForDebugger", WaitForDebugger);
 
   env->SetMethod(target, "asyncTaskScheduled", AsyncTaskScheduledWrapper);
   env->SetMethod(target, "asyncTaskCanceled",

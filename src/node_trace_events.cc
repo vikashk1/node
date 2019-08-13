@@ -1,9 +1,11 @@
 #include "base_object-inl.h"
-#include "env.h"
+#include "env-inl.h"
+#include "memory_tracker-inl.h"
 #include "node.h"
 #include "node_internals.h"
 #include "node_v8_platform-inl.h"
 #include "tracing/agent.h"
+#include "util-inl.h"
 
 #include <set>
 #include <string>
@@ -134,7 +136,7 @@ void NodeCategorySet::Initialize(Local<Object> target,
   target->Set(env->context(),
               FIXED_ONE_BYTE_STRING(env->isolate(), "CategorySet"),
               category_set->GetFunction(env->context()).ToLocalChecked())
-              .FromJust();
+              .Check();
 
   Local<String> isTraceCategoryEnabled =
       FIXED_ONE_BYTE_STRING(env->isolate(), "isTraceCategoryEnabled");
@@ -145,9 +147,9 @@ void NodeCategorySet::Initialize(Local<Object> target,
   Local<Object> binding = context->GetExtrasBindingObject();
   target->Set(context, isTraceCategoryEnabled,
               binding->Get(context, isTraceCategoryEnabled).ToLocalChecked())
-                  .FromJust();
+                  .Check();
   target->Set(context, trace,
-              binding->Get(context, trace).ToLocalChecked()).FromJust();
+              binding->Get(context, trace).ToLocalChecked()).Check();
 }
 
 }  // namespace node

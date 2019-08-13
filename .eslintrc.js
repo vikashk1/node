@@ -1,11 +1,17 @@
 'use strict';
 
+/* eslint-env node */
+
 const Module = require('module');
 const path = require('path');
 
 const NodePlugin = require('./tools/node_modules/eslint-plugin-node-core');
 NodePlugin.RULES_DIR = path.resolve(__dirname, 'tools', 'eslint-rules');
 
+// The Module._findPath() monkeypatching is to make it so that ESLint will work
+// if invoked by a globally-installed ESLint or ESLint installed elsewhere
+// rather than the one we ship. This makes it possible for IDEs to lint files
+// with our rules while people edit them.
 const ModuleFindPath = Module._findPath;
 const hacks = [
   'eslint-plugin-node-core',
@@ -31,13 +37,15 @@ Module._findPath = (request, paths, isMain) => {
 module.exports = {
   root: true,
   plugins: ['markdown', 'node-core'],
-  env: { node: true, es6: true },
   parser: 'babel-eslint',
   parserOptions: { sourceType: 'script' },
   overrides: [
     {
       files: [
         'doc/api/esm.md',
+        'doc/api/modules.md',
+        'test/es-module/test-esm-type-flag.js',
+        'test/es-module/test-esm-type-flag-alias.js',
         '*.mjs',
         'test/es-module/test-esm-example-loader.js',
       ],
@@ -56,13 +64,15 @@ module.exports = {
     'array-callback-return': 'error',
     'arrow-parens': ['error', 'always'],
     'arrow-spacing': ['error', { before: true, after: true }],
+    'block-scoped-var': 'error',
     'block-spacing': 'error',
     'brace-style': ['error', '1tbs', { allowSingleLine: true }],
     'capitalized-comments': ['error', 'always', {
       line: {
-        // Ignore all lines that have less characters than 30 and all lines that
+        // Ignore all lines that have less characters than 20 and all lines that
         // start with something that looks like a variable name or code.
-        ignorePattern: '^.{0,30}$|^ [a-z]+ ?[0-9A-Z_.(/=:[#-]|^ std',
+        // eslint-disable-next-line max-len
+        ignorePattern: '.{0,20}$|[a-z]+ ?[0-9A-Z_.(/=:[#-]|std|http|ssh|ftp|(let|var|const) [a-z_A-Z0-9]+ =|[b-z] |[a-z]*[0-9].* ',
         ignoreInlineComments: true,
         ignoreConsecutiveComments: true,
       },
@@ -104,6 +114,7 @@ module.exports = {
       tabWidth: 2,
     }],
     'new-parens': 'error',
+    'no-async-promise-executor': 'error',
     'no-class-assign': 'error',
     'no-confusing-arrow': 'error',
     'no-const-assign': 'error',
@@ -137,7 +148,7 @@ module.exports = {
     'no-octal': 'error',
     'no-path-concat': 'error',
     'no-proto': 'error',
-    'no-redeclare': 'error',
+    'no-redeclare': ['error', { 'builtinGlobals': false }],
     'no-restricted-modules': ['error', 'sys'],
     /* eslint-disable max-len */
     'no-restricted-properties': [
@@ -181,7 +192,11 @@ module.exports = {
       },
       {
         selector: "CallExpression[callee.property.name='doesNotThrow']",
-        message: 'Please replace `assert.doesNotThrow()` and add a comment next to the code instead.',
+        message: 'Do not use `assert.doesNotThrow()`. Write the code without the wrapper and add a comment instead.',
+      },
+      {
+        selector: "CallExpression[callee.property.name='doesNotReject']",
+        message: 'Do not use `assert.doesNotReject()`. Write the code without the wrapper and add a comment instead.',
       },
       {
         selector: "CallExpression[callee.property.name='rejects'][arguments.length<2]",
@@ -226,12 +241,13 @@ module.exports = {
       {
         selector: "CallExpression[callee.property.name='strictEqual'][arguments.0.type='Literal']:not([arguments.1.type='Literal']):not([arguments.1.type='ObjectExpression']):not([arguments.1.type='ArrayExpression']):not([arguments.1.type='UnaryExpression'])",
         message: 'The first argument should be the `actual`, not the `expected` value.',
-      }
+      },
     ],
     /* eslint-enable max-len */
     'no-return-await': 'error',
     'no-self-assign': 'error',
     'no-self-compare': 'error',
+    'no-shadow-restricted-names': 'error',
     'no-tabs': 'error',
     'no-template-curly-in-string': 'error',
     'no-this-before-super': 'error',

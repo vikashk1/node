@@ -21,7 +21,6 @@
 
 #include "env-inl.h"
 #include "string_bytes.h"
-#include "util.h"
 
 #ifdef __MINGW32__
 # include <io.h>
@@ -50,6 +49,7 @@ using v8::Integer;
 using v8::Isolate;
 using v8::Local;
 using v8::MaybeLocal;
+using v8::NewStringType;
 using v8::Null;
 using v8::Number;
 using v8::Object;
@@ -70,7 +70,9 @@ static void GetHostname(const FunctionCallbackInfo<Value>& args) {
     return args.GetReturnValue().SetUndefined();
   }
 
-  args.GetReturnValue().Set(OneByteString(env->isolate(), buf));
+  args.GetReturnValue().Set(
+      String::NewFromUtf8(env->isolate(), buf, NewStringType::kNormal)
+          .ToLocalChecked());
 }
 
 
@@ -85,7 +87,9 @@ static void GetOSType(const FunctionCallbackInfo<Value>& args) {
     return args.GetReturnValue().SetUndefined();
   }
 
-  args.GetReturnValue().Set(OneByteString(env->isolate(), info.sysname));
+  args.GetReturnValue().Set(
+      String::NewFromUtf8(env->isolate(), info.sysname, NewStringType::kNormal)
+          .ToLocalChecked());
 }
 
 
@@ -100,7 +104,9 @@ static void GetOSRelease(const FunctionCallbackInfo<Value>& args) {
     return args.GetReturnValue().SetUndefined();
   }
 
-  args.GetReturnValue().Set(OneByteString(env->isolate(), info.release));
+  args.GetReturnValue().Set(
+      String::NewFromUtf8(env->isolate(), info.release, NewStringType::kNormal)
+          .ToLocalChecked());
 }
 
 
@@ -325,17 +331,17 @@ static void GetUserInfo(const FunctionCallbackInfo<Value>& args) {
 
   Local<Object> entry = Object::New(env->isolate());
 
-  entry->Set(env->context(), env->uid_string(), uid).FromJust();
-  entry->Set(env->context(), env->gid_string(), gid).FromJust();
+  entry->Set(env->context(), env->uid_string(), uid).Check();
+  entry->Set(env->context(), env->gid_string(), gid).Check();
   entry->Set(env->context(),
              env->username_string(),
-             username.ToLocalChecked()).FromJust();
+             username.ToLocalChecked()).Check();
   entry->Set(env->context(),
              env->homedir_string(),
-             homedir.ToLocalChecked()).FromJust();
+             homedir.ToLocalChecked()).Check();
   entry->Set(env->context(),
              env->shell_string(),
-             shell.ToLocalChecked()).FromJust();
+             shell.ToLocalChecked()).Check();
 
   args.GetReturnValue().Set(entry);
 }
@@ -401,7 +407,7 @@ void Initialize(Local<Object> target,
   env->SetMethod(target, "getPriority", GetPriority);
   target->Set(env->context(),
               FIXED_ONE_BYTE_STRING(env->isolate(), "isBigEndian"),
-              Boolean::New(env->isolate(), IsBigEndian())).FromJust();
+              Boolean::New(env->isolate(), IsBigEndian())).Check();
 }
 
 }  // namespace os

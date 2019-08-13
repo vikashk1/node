@@ -5,7 +5,9 @@
 #ifndef V8_BASE_SMALL_VECTOR_H_
 #define V8_BASE_SMALL_VECTOR_H_
 
+#include <algorithm>
 #include <type_traits>
+#include <utility>
 
 #include "src/base/bits.h"
 #include "src/base/macros.h"
@@ -15,7 +17,7 @@ namespace base {
 
 // Minimal SmallVector implementation. Uses inline storage first, switches to
 // malloc when it overflows.
-template <typename T, size_t kInlineSize>
+template <typename T, size_t kSize>
 class SmallVector {
   // Currently only support trivially copyable and trivially destructible data
   // types, as it uses memcpy to copy elements and never calls destructors.
@@ -23,9 +25,16 @@ class SmallVector {
   STATIC_ASSERT(std::is_trivially_destructible<T>::value);
 
  public:
+  static constexpr size_t kInlineSize = kSize;
+
   SmallVector() = default;
+  explicit SmallVector(size_t size) { resize_no_init(size); }
   SmallVector(const SmallVector& other) V8_NOEXCEPT { *this = other; }
   SmallVector(SmallVector&& other) V8_NOEXCEPT { *this = std::move(other); }
+  SmallVector(std::initializer_list<T> init) {
+    resize_no_init(init.size());
+    memcpy(begin_, init.begin(), sizeof(T) * init.size());
+  }
 
   ~SmallVector() {
     if (is_big()) free(begin_);
@@ -62,9 +71,15 @@ class SmallVector {
     return *this;
   }
 
-  T* data() const { return begin_; }
-  T* begin() const { return begin_; }
-  T* end() const { return end_; }
+  T* data() { return begin_; }
+  const T* data() const { return begin_; }
+
+  T* begin() { return begin_; }
+  const T* begin() const { return begin_; }
+
+  T* end() { return end_; }
+  const T* end() const { return end_; }
+
   size_t size() const { return end_ - begin_; }
   bool empty() const { return end_ == begin_; }
   size_t capacity() const { return end_of_storage_ - begin_; }

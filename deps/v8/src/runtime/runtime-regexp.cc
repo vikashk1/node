@@ -4,18 +4,18 @@
 
 #include <functional>
 
-#include "src/arguments-inl.h"
-#include "src/conversions-inl.h"
-#include "src/counters.h"
-#include "src/isolate-inl.h"
-#include "src/message-template.h"
+#include "src/execution/arguments-inl.h"
+#include "src/execution/isolate-inl.h"
+#include "src/execution/message-template.h"
+#include "src/heap/heap-inl.h"  // For ToBoolean. TODO(jkummerow): Drop.
+#include "src/logging/counters.h"
+#include "src/numbers/conversions-inl.h"
 #include "src/objects/js-array-inl.h"
 #include "src/regexp/jsregexp-inl.h"
-#include "src/regexp/jsregexp.h"
 #include "src/regexp/regexp-utils.h"
 #include "src/runtime/runtime-utils.h"
-#include "src/string-builder-inl.h"
-#include "src/string-search.h"
+#include "src/strings/string-builder-inl.h"
+#include "src/strings/string-search.h"
 #include "src/zone/zone-chunk-list.h"
 
 namespace v8 {
@@ -45,17 +45,17 @@ int LookupNamedCapture(const std::function<bool(String)>& name_matches,
   // internalized strings.
 
   int maybe_capture_index = -1;
-  const int named_capture_count = capture_name_map->length() >> 1;
+  const int named_capture_count = capture_name_map.length() >> 1;
   for (int j = 0; j < named_capture_count; j++) {
     // The format of {capture_name_map} is documented at
     // JSRegExp::kIrregexpCaptureNameMapIndex.
     const int name_ix = j * 2;
     const int index_ix = j * 2 + 1;
 
-    String capture_name = String::cast(capture_name_map->get(name_ix));
+    String capture_name = String::cast(capture_name_map.get(name_ix));
     if (!name_matches(capture_name)) continue;
 
-    maybe_capture_index = Smi::ToInt(capture_name_map->get(index_ix));
+    maybe_capture_index = Smi::ToInt(capture_name_map.get(index_ix));
     break;
   }
 
@@ -267,7 +267,7 @@ class CompiledReplacement {
 
             const int capture_index = LookupNamedCapture(
                 [=](String capture_name) {
-                  return capture_name->IsEqualTo(requested_name);
+                  return capture_name.IsEqualTo(requested_name);
                 },
                 capture_name_map);
 
@@ -323,7 +323,7 @@ bool CompiledReplacement::Compile(Isolate* isolate, Handle<JSRegExp> regexp,
     if (capture_count > 0) {
       DCHECK_EQ(regexp->TypeTag(), JSRegExp::IRREGEXP);
       Object maybe_capture_name_map = regexp->CaptureNameMap();
-      if (maybe_capture_name_map->IsFixedArray()) {
+      if (maybe_capture_name_map.IsFixedArray()) {
         capture_name_map = FixedArray::cast(maybe_capture_name_map);
       }
     }
@@ -405,7 +405,7 @@ void FindOneByteStringIndices(Vector<const uint8_t> subject, uint8_t pattern,
   DCHECK_LT(0, limit);
   // Collect indices of pattern in subject using memchr.
   // Stop after finding at most limit values.
-  const uint8_t* subject_start = subject.start();
+  const uint8_t* subject_start = subject.begin();
   const uint8_t* subject_end = subject_start + subject.length();
   const uint8_t* pos = subject_start;
   while (limit > 0) {
@@ -421,7 +421,7 @@ void FindOneByteStringIndices(Vector<const uint8_t> subject, uint8_t pattern,
 void FindTwoByteStringIndices(const Vector<const uc16> subject, uc16 pattern,
                               std::vector<int>* indices, unsigned int limit) {
   DCHECK_LT(0, limit);
-  const uc16* subject_start = subject.start();
+  const uc16* subject_start = subject.begin();
   const uc16* subject_end = subject_start + subject.length();
   for (const uc16* pos = subject_start; pos < subject_end && limit > 0; pos++) {
     if (*pos == pattern) {
@@ -454,8 +454,8 @@ void FindStringIndicesDispatch(Isolate* isolate, String subject, String pattern,
                                std::vector<int>* indices, unsigned int limit) {
   {
     DisallowHeapAllocation no_gc;
-    String::FlatContent subject_content = subject->GetFlatContent(no_gc);
-    String::FlatContent pattern_content = pattern->GetFlatContent(no_gc);
+    String::FlatContent subject_content = subject.GetFlatContent(no_gc);
+    String::FlatContent pattern_content = pattern.GetFlatContent(no_gc);
     DCHECK(subject_content.IsFlat());
     DCHECK(pattern_content.IsFlat());
     if (subject_content.IsOneByte()) {
@@ -533,7 +533,7 @@ V8_WARN_UNUSED_RESULT static Object StringReplaceGlobalAtomRegExpWithString(
   String pattern =
       String::cast(pattern_regexp->DataAt(JSRegExp::kAtomPatternIndex));
   int subject_len = subject->length();
-  int pattern_len = pattern->length();
+  int pattern_len = pattern.length();
   int replacement_len = replacement->length();
 
   FindStringIndicesDispatch(isolate, *subject, pattern, indices, 0xFFFFFFFF);
@@ -628,7 +628,8 @@ V8_WARN_UNUSED_RESULT static Object StringReplaceGlobalRegExpWithString(
 
   // Shortcut for simple non-regexp global replacements
   if (typeTag == JSRegExp::ATOM && simple_replace) {
-    if (subject->HasOnlyOneByteChars() && replacement->HasOnlyOneByteChars()) {
+    if (subject->IsOneByteRepresentation() &&
+        replacement->IsOneByteRepresentation()) {
       return StringReplaceGlobalAtomRegExpWithString<SeqOneByteString>(
           isolate, subject, regexp, replacement, last_match_info);
     } else {
@@ -652,16 +653,9 @@ V8_WARN_UNUSED_RESULT static Object StringReplaceGlobalRegExpWithString(
   int expected_parts = (compiled_replacement.parts() + 1) * 4 + 1;
   ReplacementStringBuilder builder(isolate->heap(), subject, expected_parts);
 
-  // Number of parts added by compiled replacement plus preceding
-  // string and possibly suffix after last match.  It is possible for
-  // all components to use two elements when encoded as two smis.
-  const int parts_added_per_loop = 2 * (compiled_replacement.parts() + 2);
-
   int prev = 0;
 
   do {
-    builder.EnsureCapacity(parts_added_per_loop);
-
     int start = current_match[0];
     int end = current_match[1];
 
@@ -682,7 +676,6 @@ V8_WARN_UNUSED_RESULT static Object StringReplaceGlobalRegExpWithString(
   if (global_cache.HasException()) return ReadOnlyRoots(isolate).exception();
 
   if (prev < subject_length) {
-    builder.EnsureCapacity(2);
     builder.AddSubjectSlice(prev, subject_length);
   }
 
@@ -791,33 +784,6 @@ V8_WARN_UNUSED_RESULT static Object StringReplaceGlobalRegExpWithEmptyString(
   return *answer;
 }
 
-namespace {
-
-Object StringReplaceGlobalRegExpWithStringHelper(
-    Isolate* isolate, Handle<JSRegExp> regexp, Handle<String> subject,
-    Handle<String> replacement, Handle<RegExpMatchInfo> last_match_info) {
-  CHECK(regexp->GetFlags() & JSRegExp::kGlobal);
-
-  subject = String::Flatten(isolate, subject);
-
-  if (replacement->length() == 0) {
-    if (subject->HasOnlyOneByteChars()) {
-      return StringReplaceGlobalRegExpWithEmptyString<SeqOneByteString>(
-          isolate, subject, regexp, last_match_info);
-    } else {
-      return StringReplaceGlobalRegExpWithEmptyString<SeqTwoByteString>(
-          isolate, subject, regexp, last_match_info);
-    }
-  }
-
-  replacement = String::Flatten(isolate, replacement);
-
-  return StringReplaceGlobalRegExpWithString(isolate, subject, regexp,
-                                             replacement, last_match_info);
-}
-
-}  // namespace
-
 RUNTIME_FUNCTION(Runtime_StringSplit) {
   HandleScope handle_scope(isolate);
   DCHECK_EQ(3, args.length());
@@ -915,20 +881,6 @@ RUNTIME_FUNCTION(Runtime_RegExpExec) {
                                                      index, last_match_info));
 }
 
-RUNTIME_FUNCTION(Runtime_RegExpInternalReplace) {
-  HandleScope scope(isolate);
-  DCHECK_EQ(3, args.length());
-  CONVERT_ARG_HANDLE_CHECKED(JSRegExp, regexp, 0);
-  CONVERT_ARG_HANDLE_CHECKED(String, subject, 1);
-  CONVERT_ARG_HANDLE_CHECKED(String, replacement, 2);
-
-  Handle<RegExpMatchInfo> internal_match_info =
-      isolate->regexp_internal_match_info();
-
-  return StringReplaceGlobalRegExpWithStringHelper(
-      isolate, regexp, subject, replacement, internal_match_info);
-}
-
 namespace {
 
 class MatchInfoBackedMatch : public String::Match {
@@ -941,7 +893,7 @@ class MatchInfoBackedMatch : public String::Match {
 
     if (regexp->TypeTag() == JSRegExp::IRREGEXP) {
       Object o = regexp->CaptureNameMap();
-      has_named_captures_ = o->IsFixedArray();
+      has_named_captures_ = o.IsFixedArray();
       if (has_named_captures_) {
         capture_name_map_ = handle(FixedArray::cast(o), isolate);
       }
@@ -982,7 +934,7 @@ class MatchInfoBackedMatch : public String::Match {
                                       CaptureState* state) override {
     DCHECK(has_named_captures_);
     const int capture_index = LookupNamedCapture(
-        [=](String capture_name) { return capture_name->Equals(*name); },
+        [=](String capture_name) { return capture_name.Equals(*name); },
         *capture_name_map_);
 
     if (capture_index == -1) {
@@ -1143,11 +1095,11 @@ static Object SearchRegExpMultiple(Isolate* isolate, Handle<String> subject,
     Object cached_answer = RegExpResultsCache::Lookup(
         isolate->heap(), *subject, regexp->data(), &last_match_cache,
         RegExpResultsCache::REGEXP_MULTIPLE_INDICES);
-    if (cached_answer->IsFixedArray()) {
+    if (cached_answer.IsFixedArray()) {
       int capture_registers = (capture_count + 1) * 2;
       int32_t* last_match = NewArray<int32_t>(capture_registers);
       for (int i = 0; i < capture_registers; i++) {
-        last_match[i] = Smi::ToInt(last_match_cache->get(i));
+        last_match[i] = Smi::ToInt(last_match_cache.get(i));
       }
       Handle<FixedArray> cached_fixed_array =
           Handle<FixedArray>(FixedArray::cast(cached_answer), isolate);
@@ -1298,10 +1250,9 @@ static Object SearchRegExpMultiple(Isolate* isolate, Handle<String> subject,
 // doesn't properly call the underlying exec method.
 V8_WARN_UNUSED_RESULT MaybeHandle<String> RegExpReplace(
     Isolate* isolate, Handle<JSRegExp> regexp, Handle<String> string,
-    Handle<Object> replace_obj) {
+    Handle<String> replace) {
   // Functional fast-paths are dispatched directly by replace builtin.
   DCHECK(RegExpUtils::IsUnmodifiedRegExp(isolate, regexp));
-  DCHECK(!replace_obj->IsCallable());
 
   Factory* factory = isolate->factory();
 
@@ -1309,9 +1260,6 @@ V8_WARN_UNUSED_RESULT MaybeHandle<String> RegExpReplace(
   const bool global = (flags & JSRegExp::kGlobal) != 0;
   const bool sticky = (flags & JSRegExp::kSticky) != 0;
 
-  Handle<String> replace;
-  ASSIGN_RETURN_ON_EXCEPTION(isolate, replace,
-                             Object::ToString(isolate, replace_obj), String);
   replace = String::Flatten(isolate, replace);
 
   Handle<RegExpMatchInfo> last_match_info = isolate->regexp_last_match_info();
@@ -1331,8 +1279,8 @@ V8_WARN_UNUSED_RESULT MaybeHandle<String> RegExpReplace(
     Handle<Object> match_indices_obj(ReadOnlyRoots(isolate).null_value(),
                                      isolate);
 
-    // A lastIndex exceeding the string length always always returns null
-    // (signalling failure) in RegExpBuiltinExec, thus we can skip the call.
+    // A lastIndex exceeding the string length always returns null (signalling
+    // failure) in RegExpBuiltinExec, thus we can skip the call.
     if (last_index <= static_cast<uint32_t>(string->length())) {
       ASSIGN_RETURN_ON_EXCEPTION(isolate, match_indices_obj,
                                  RegExpImpl::Exec(isolate, regexp, string,
@@ -1350,8 +1298,9 @@ V8_WARN_UNUSED_RESULT MaybeHandle<String> RegExpReplace(
     const int start_index = match_indices->Capture(0);
     const int end_index = match_indices->Capture(1);
 
-    if (sticky)
+    if (sticky) {
       regexp->set_last_index(Smi::FromInt(end_index), SKIP_WRITE_BARRIER);
+    }
 
     IncrementalStringBuilder builder(isolate);
     builder.AppendString(factory->NewSubString(string, 0, start_index));
@@ -1375,7 +1324,7 @@ V8_WARN_UNUSED_RESULT MaybeHandle<String> RegExpReplace(
                         String);
 
     if (replace->length() == 0) {
-      if (string->HasOnlyOneByteChars()) {
+      if (string->IsOneByteRepresentation()) {
         Object result =
             StringReplaceGlobalRegExpWithEmptyString<SeqOneByteString>(
                 isolate, string, regexp, last_match_info);
@@ -1390,7 +1339,7 @@ V8_WARN_UNUSED_RESULT MaybeHandle<String> RegExpReplace(
 
     Object result = StringReplaceGlobalRegExpWithString(
         isolate, string, regexp, replace, last_match_info);
-    if (result->IsString()) {
+    if (result.IsString()) {
       return handle(String::cast(result), isolate);
     } else {
       return MaybeHandle<String>();
@@ -1411,18 +1360,23 @@ RUNTIME_FUNCTION(Runtime_RegExpExecMultiple) {
   CONVERT_ARG_HANDLE_CHECKED(String, subject, 1);
   CONVERT_ARG_HANDLE_CHECKED(RegExpMatchInfo, last_match_info, 2);
   CONVERT_ARG_HANDLE_CHECKED(JSArray, result_array, 3);
+
+  DCHECK(RegExpUtils::IsUnmodifiedRegExp(isolate, regexp));
   CHECK(result_array->HasObjectElements());
 
   subject = String::Flatten(isolate, subject);
   CHECK(regexp->GetFlags() & JSRegExp::kGlobal);
 
+  Object result;
   if (regexp->CaptureCount() == 0) {
-    return SearchRegExpMultiple<false>(isolate, subject, regexp,
-                                       last_match_info, result_array);
+    result = SearchRegExpMultiple<false>(isolate, subject, regexp,
+                                         last_match_info, result_array);
   } else {
-    return SearchRegExpMultiple<true>(isolate, subject, regexp, last_match_info,
-                                      result_array);
+    result = SearchRegExpMultiple<true>(isolate, subject, regexp,
+                                        last_match_info, result_array);
   }
+  DCHECK(RegExpUtils::IsUnmodifiedRegExp(isolate, regexp));
+  return result;
 }
 
 RUNTIME_FUNCTION(Runtime_StringReplaceNonGlobalRegExpWithFunction) {
@@ -1433,7 +1387,7 @@ RUNTIME_FUNCTION(Runtime_StringReplaceNonGlobalRegExpWithFunction) {
   CONVERT_ARG_HANDLE_CHECKED(JSReceiver, replace_obj, 2);
 
   DCHECK(RegExpUtils::IsUnmodifiedRegExp(isolate, regexp));
-  DCHECK(replace_obj->map()->is_callable());
+  DCHECK(replace_obj->map().is_callable());
 
   Factory* factory = isolate->factory();
   Handle<RegExpMatchInfo> last_match_info = isolate->regexp_last_match_info();
@@ -1450,14 +1404,19 @@ RUNTIME_FUNCTION(Runtime_StringReplaceNonGlobalRegExpWithFunction) {
     ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
         isolate, last_index_obj, Object::ToLength(isolate, last_index_obj));
     last_index = PositiveNumberToUint32(*last_index_obj);
-
-    if (last_index > static_cast<uint32_t>(subject->length())) last_index = 0;
   }
 
-  Handle<Object> match_indices_obj;
-  ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
-      isolate, match_indices_obj,
-      RegExpImpl::Exec(isolate, regexp, subject, last_index, last_match_info));
+  Handle<Object> match_indices_obj(ReadOnlyRoots(isolate).null_value(),
+                                   isolate);
+
+  // A lastIndex exceeding the string length always returns null (signalling
+  // failure) in RegExpBuiltinExec, thus we can skip the call.
+  if (last_index <= static_cast<uint32_t>(subject->length())) {
+    ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
+        isolate, match_indices_obj,
+        RegExpImpl::Exec(isolate, regexp, subject, last_index,
+                         last_match_info));
+  }
 
   if (match_indices_obj->IsNull(isolate)) {
     if (sticky) regexp->set_last_index(Smi::kZero, SKIP_WRITE_BARRIER);
@@ -1470,8 +1429,9 @@ RUNTIME_FUNCTION(Runtime_StringReplaceNonGlobalRegExpWithFunction) {
   const int index = match_indices->Capture(0);
   const int end_of_match = match_indices->Capture(1);
 
-  if (sticky)
+  if (sticky) {
     regexp->set_last_index(Smi::FromInt(end_of_match), SKIP_WRITE_BARRIER);
+  }
 
   IncrementalStringBuilder builder(isolate);
   builder.AppendString(factory->NewSubString(subject, 0, index));
@@ -1490,7 +1450,7 @@ RUNTIME_FUNCTION(Runtime_StringReplaceNonGlobalRegExpWithFunction) {
     DCHECK_EQ(regexp->TypeTag(), JSRegExp::IRREGEXP);
 
     Object maybe_capture_map = regexp->CaptureNameMap();
-    if (maybe_capture_map->IsFixedArray()) {
+    if (maybe_capture_map.IsFixedArray()) {
       has_named_captures = true;
       capture_map = handle(FixedArray::cast(maybe_capture_map), isolate);
     }
@@ -1529,7 +1489,7 @@ RUNTIME_FUNCTION(Runtime_StringReplaceNonGlobalRegExpWithFunction) {
   ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
       isolate, replacement_obj,
       Execution::Call(isolate, replace_obj, factory->undefined_value(), argc,
-                      argv.start()));
+                      argv.begin()));
 
   Handle<String> replacement;
   ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
@@ -1618,7 +1578,7 @@ RUNTIME_FUNCTION(Runtime_RegExpSplit) {
     Handle<Object> splitter_obj;
     ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
         isolate, splitter_obj,
-        Execution::New(isolate, ctor, argc, argv.start()));
+        Execution::New(isolate, ctor, argc, argv.begin()));
 
     splitter = Handle<JSReceiver>::cast(splitter_obj);
   }
@@ -1725,7 +1685,7 @@ RUNTIME_FUNCTION(Runtime_RegExpSplit) {
 // Slow path for:
 // ES#sec-regexp.prototype-@@replace
 // RegExp.prototype [ @@replace ] ( string, replaceValue )
-RUNTIME_FUNCTION(Runtime_RegExpReplace) {
+RUNTIME_FUNCTION(Runtime_RegExpReplaceRT) {
   HandleScope scope(isolate);
   DCHECK_EQ(3, args.length());
 
@@ -1739,23 +1699,26 @@ RUNTIME_FUNCTION(Runtime_RegExpReplace) {
 
   const bool functional_replace = replace_obj->IsCallable();
 
-  // Fast-path for unmodified JSRegExps (and non-functional replace).
-  if (RegExpUtils::IsUnmodifiedRegExp(isolate, recv)) {
-    // We should never get here with functional replace because unmodified
-    // regexp and functional replace should be fully handled in CSA code.
-    CHECK(!functional_replace);
-    RETURN_RESULT_OR_FAILURE(
-        isolate, RegExpReplace(isolate, Handle<JSRegExp>::cast(recv), string,
-                               replace_obj));
-  }
-
-  const uint32_t length = string->length();
-
   Handle<String> replace;
   if (!functional_replace) {
     ASSIGN_RETURN_FAILURE_ON_EXCEPTION(isolate, replace,
                                        Object::ToString(isolate, replace_obj));
   }
+
+  // Fast-path for unmodified JSRegExps (and non-functional replace).
+  if (RegExpUtils::IsUnmodifiedRegExp(isolate, recv)) {
+    // We should never get here with functional replace because unmodified
+    // regexp and functional replace should be fully handled in CSA code.
+    CHECK(!functional_replace);
+    Handle<Object> result;
+    ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
+        isolate, result,
+        RegExpReplace(isolate, Handle<JSRegExp>::cast(recv), string, replace));
+    DCHECK(RegExpUtils::IsUnmodifiedRegExp(isolate, recv));
+    return *result;
+  }
+
+  const uint32_t length = string->length();
 
   Handle<Object> global_obj;
   ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
@@ -1888,7 +1851,7 @@ RUNTIME_FUNCTION(Runtime_RegExpReplace) {
       ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
           isolate, replacement_obj,
           Execution::Call(isolate, replace_obj, factory->undefined_value(),
-                          argc, argv.start()));
+                          argc, argv.begin()));
 
       ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
           isolate, replacement, Object::ToString(isolate, replacement_obj));
@@ -1941,7 +1904,7 @@ RUNTIME_FUNCTION(Runtime_IsRegExp) {
   SealHandleScope shs(isolate);
   DCHECK_EQ(1, args.length());
   CONVERT_ARG_CHECKED(Object, obj, 0);
-  return isolate->heap()->ToBoolean(obj->IsJSRegExp());
+  return isolate->heap()->ToBoolean(obj.IsJSRegExp());
 }
 
 }  // namespace internal

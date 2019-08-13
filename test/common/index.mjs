@@ -1,6 +1,10 @@
 // Flags: --experimental-modules
-/* eslint-disable node-core/required-modules */
-import common from './index.js';
+/* eslint-disable node-core/require-common-first, node-core/required-modules */
+
+import { createRequire } from 'module';
+
+const require = createRequire(import.meta.url);
+const common = require('./index.js');
 
 const {
   isMainThread,
@@ -91,5 +95,6 @@ export {
   getBufferSources,
   disableCrashOnUnhandledRejection,
   getTTYfd,
-  runWithInvalidFD
+  runWithInvalidFD,
+  createRequire
 };

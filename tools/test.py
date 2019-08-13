@@ -52,21 +52,7 @@ try:
 except ImportError:
     from Queue import Queue, Empty  # Python 2
 
-try:
-    cmp             # Python 2
-except NameError:
-    def cmp(x, y):  # Python 3
-        return (x > y) - (x < y)
-
-try:
-  reduce            # Python 2
-except NameError:   # Python 3
-  from functools import reduce
-
-try:
-  xrange            # Python 2
-except NameError:
-  xrange = range    # Python 3
+from functools import reduce
 
 try:
   from urllib.parse import unquote    # Python 3
@@ -91,6 +77,7 @@ class ProgressIndicator(object):
 
   def __init__(self, cases, flaky_tests_mode):
     self.cases = cases
+    self.serial_id = 0
     self.flaky_tests_mode = flaky_tests_mode
     self.parallel_queue = Queue(len(cases))
     self.sequential_queue = Queue(len(cases))
@@ -135,9 +122,9 @@ class ProgressIndicator(object):
       for thread in threads:
         # Use a timeout so that signals (ctrl-c) will be processed.
         thread.join(timeout=10000000)
-    except (KeyboardInterrupt, SystemExit) as e:
+    except (KeyboardInterrupt, SystemExit):
       self.shutdown_event.set()
-    except Exception as e:
+    except Exception:
       # If there's an exception we schedule an interruption for any
       # remaining threads.
       self.shutdown_event.set()
@@ -160,6 +147,8 @@ class ProgressIndicator(object):
       case = test
       case.thread_id = thread_id
       self.lock.acquire()
+      case.serial_id = self.serial_id
+      self.serial_id += 1
       self.AboutToRun(case)
       self.lock.release()
       try:
@@ -174,7 +163,7 @@ class ProgressIndicator(object):
             output = case.Run()
             output.diagnostic.append('ECONNREFUSED received, test retried')
         case.duration = (datetime.now() - start)
-      except IOError as e:
+      except IOError:
         return
       if self.shutdown_event.is_set():
         return
@@ -355,7 +344,7 @@ class TapProgressIndicator(SimpleProgressIndicator):
     logger.info('  ---')
     logger.info('  duration_ms: %d.%d' %
       (total_seconds, duration.microseconds / 1000))
-    if self.severity is not 'ok' or self.traceback is not '':
+    if self.severity != 'ok' or self.traceback != '':
       if output.HasTimedOut():
         self.traceback = 'timeout\n' + output.output.stdout + output.output.stderr
       self._printDiagnostic()
@@ -383,9 +372,10 @@ class DeoptsCheckProgressIndicator(SimpleProgressIndicator):
     stdout = output.output.stdout.strip()
     printed_file = False
     for line in stdout.splitlines():
-      if (line.startswith("[aborted optimiz") or \
-          line.startswith("[disabled optimiz")) and \
-         ("because:" in line or "reason:" in line):
+      if (
+        (line.startswith("[aborted optimiz") or line.startswith("[disabled optimiz")) and
+        ("because:" in line or "reason:" in line)
+      ):
         if not printed_file:
           printed_file = True
           print('==== %s ====' % command)
@@ -517,13 +507,11 @@ class TestCase(object):
     self.mode = mode
     self.parallel = False
     self.disable_core_files = False
+    self.serial_id = 0
     self.thread_id = 0
 
   def IsNegative(self):
     return self.context.expect_fail
-
-  def CompareTime(self, other):
-    return cmp(other.duration, self.duration)
 
   def DidFail(self, output):
     if output.failed is None:
@@ -551,6 +539,7 @@ class TestCase(object):
   def Run(self):
     try:
       result = self.RunCommand(self.GetCommand(), {
+        "TEST_SERIAL_ID": "%d" % self.serial_id,
         "TEST_THREAD_ID": "%d" % self.thread_id,
         "TEST_PARALLEL" : "%d" % self.parallel
       })
@@ -597,7 +586,7 @@ class TestOutput(object):
       return self.output.exit_code < 0
 
   def HasTimedOut(self):
-    return self.output.timed_out;
+    return self.output.timed_out
 
   def HasFailed(self):
     execution_failed = self.test.DidFail(self.output)
@@ -654,15 +643,10 @@ def RunProcess(context, timeout, args, **rest):
       prev_error_mode = Win32SetErrorMode(error_mode)
       Win32SetErrorMode(error_mode | prev_error_mode)
 
-  faketty = rest.pop('faketty', False)
-  pty_out = rest.pop('pty_out')
-
   process = subprocess.Popen(
     args = popen_args,
     **rest
   )
-  if faketty:
-    os.close(rest['stdout'])
   if utils.IsWindows() and context.suppress_dialogs and prev_error_mode != SEM_INVALID_VALUE:
     Win32SetErrorMode(prev_error_mode)
   # Compute the end time - if the process crosses this limit we
@@ -674,28 +658,6 @@ def RunProcess(context, timeout, args, **rest):
   # loop and keep track of whether or not it times out.
   exit_code = None
   sleep_time = INITIAL_SLEEP_TIME
-  output = ''
-  if faketty:
-    while True:
-      if time.time() >= end_time:
-        # Kill the process and wait for it to exit.
-        KillTimedOutProcess(context, process.pid)
-        exit_code = process.wait()
-        timed_out = True
-        break
-
-      # source: http://stackoverflow.com/a/12471855/1903116
-      # related: http://stackoverflow.com/q/11165521/1903116
-      try:
-        data = os.read(pty_out, 9999)
-      except OSError as e:
-        if e.errno != errno.EIO:
-          raise
-        break # EIO means EOF on some systems
-      else:
-        if not data: # EOF
-          break
-        output += data
 
   while exit_code is None:
     if (not end_time is None) and (time.time() >= end_time):
@@ -709,7 +671,7 @@ def RunProcess(context, timeout, args, **rest):
       sleep_time = sleep_time * SLEEP_TIME_FACTOR
       if sleep_time > MAX_SLEEP_TIME:
         sleep_time = MAX_SLEEP_TIME
-  return (process, exit_code, timed_out, output)
+  return (process, exit_code, timed_out)
 
 
 def PrintError(str):
@@ -731,29 +693,12 @@ def CheckedUnlink(name):
       PrintError("os.unlink() " + str(e))
     break
 
-def Execute(args, context, timeout=None, env={}, faketty=False, disable_core_files=False, input=None):
-  if faketty:
-    import pty
-    (out_master, fd_out) = pty.openpty()
-    fd_in = fd_err = fd_out
-    pty_out = out_master
+def Execute(args, context, timeout=None, env=None, disable_core_files=False, stdin=None):
+  (fd_out, outname) = tempfile.mkstemp()
+  (fd_err, errname) = tempfile.mkstemp()
 
-    if input is not None:
-      # Before writing input data, disable echo so the input doesn't show
-      # up as part of the output.
-      import termios
-      attr = termios.tcgetattr(fd_in)
-      attr[3] = attr[3] & ~termios.ECHO
-      termios.tcsetattr(fd_in, termios.TCSADRAIN, attr)
-
-      os.write(pty_out, input)
-      os.write(pty_out, '\x04') # End-of-file marker (Ctrl+D)
-  else:
-    (fd_out, outname) = tempfile.mkstemp()
-    (fd_err, errname) = tempfile.mkstemp()
-    fd_in = 0
-    pty_out = None
-
+  if env is None:
+    env = {}
   env_copy = os.environ.copy()
 
   # Remove NODE_PATH
@@ -772,28 +717,22 @@ def Execute(args, context, timeout=None, env={}, faketty=False, disable_core_fil
       resource.setrlimit(resource.RLIMIT_CORE, (0,0))
     preexec_fn = disableCoreFiles
 
-  (process, exit_code, timed_out, output) = RunProcess(
+  (process, exit_code, timed_out) = RunProcess(
     context,
     timeout,
     args = args,
-    stdin = fd_in,
+    stdin = stdin,
     stdout = fd_out,
     stderr = fd_err,
     env = env_copy,
-    faketty = faketty,
-    pty_out = pty_out,
     preexec_fn = preexec_fn
   )
-  if faketty:
-    os.close(out_master)
-    errors = ''
-  else:
-    os.close(fd_out)
-    os.close(fd_err)
-    output = open(outname).read()
-    errors = open(errname).read()
-    CheckedUnlink(outname)
-    CheckedUnlink(errname)
+  os.close(fd_out)
+  os.close(fd_err)
+  output = open(outname).read()
+  errors = open(errname).read()
+  CheckedUnlink(outname)
+  CheckedUnlink(errname)
 
   return CommandOutput(exit_code, timed_out, output, errors)
 
@@ -897,7 +836,7 @@ class LiteralTestSuite(TestSuite):
       if not name or name.match(test_name):
         full_path = current_path + [test_name]
         test.AddTestsToList(result, full_path, path, context, arch, mode)
-    result.sort(cmp=lambda a, b: cmp(a.GetName(), b.GetName()))
+    result.sort(key=lambda x: x.GetName())
     return result
 
   def GetTestStatus(self, context, sections, defs):
@@ -1283,7 +1222,7 @@ class Rule(object):
 HEADER_PATTERN = re.compile(r'\[([^]]+)\]')
 RULE_PATTERN = re.compile(r'\s*([^: ]*)\s*:(.*)')
 DEF_PATTERN = re.compile(r'^def\s*(\w+)\s*=(.*)$')
-PREFIX_PATTERN = re.compile(r'^\s*prefix\s+([\w\_\.\-\/]+)$')
+PREFIX_PATTERN = re.compile(r'^\s*prefix\s+([\w_.\-/]+)$')
 
 
 def ReadConfigurationInto(path, sections, defs):
@@ -1470,9 +1409,9 @@ class Pattern(object):
     return self.pattern
 
 
-def SplitPath(s):
-  stripped = [ c.strip() for c in s.split('/') ]
-  return [ Pattern(s) for s in stripped if len(s) > 0 ]
+def SplitPath(path_arg):
+  stripped = [c.strip() for c in path_arg.split('/')]
+  return [Pattern(s) for s in stripped if len(s) > 0]
 
 def NormalizePath(path, prefix='test/'):
   # strip the extra path information of the specified test
@@ -1511,7 +1450,7 @@ def FormatTime(d):
 
 
 def FormatTimedelta(td):
-  if hasattr(td.total, 'total_seconds'):
+  if hasattr(td, 'total_seconds'):
     d = td.total_seconds()
   else: # python2.6 compat
     d =  td.seconds + (td.microseconds / 10.0**6)
@@ -1641,7 +1580,7 @@ def Main():
           continue
         archEngineContext = Execute([vm, "-p", "process.arch"], context)
         vmArch = archEngineContext.stdout.rstrip()
-        if archEngineContext.exit_code is not 0 or vmArch == "undefined":
+        if archEngineContext.exit_code != 0 or vmArch == "undefined":
           print("Can't determine the arch of: '%s'" % vm)
           print(archEngineContext.stderr.rstrip())
           continue
@@ -1753,7 +1692,7 @@ def Main():
     print()
     sys.stderr.write("--- Total time: %s ---\n" % FormatTime(duration))
     timed_tests = [ t for t in cases_to_run if not t.duration is None ]
-    timed_tests.sort(lambda a, b: a.CompareTime(b))
+    timed_tests.sort(key=lambda x: x.duration)
     for i, entry in enumerate(timed_tests[:20], start=1):
       t = FormatTimedelta(entry.duration)
       sys.stderr.write("%4i (%s) %s\n" % (i, t, entry.GetLabel()))

@@ -6,9 +6,8 @@
 
 #include <limits>
 
-#include "src/address-map.h"
 #include "src/base/bits.h"
-#include "src/code-factory.h"
+#include "src/codegen/code-factory.h"
 #include "src/compiler/access-builder.h"
 #include "src/compiler/common-operator.h"
 #include "src/compiler/compiler-source-position-table.h"
@@ -22,8 +21,9 @@
 #include "src/compiler/representation-change.h"
 #include "src/compiler/simplified-operator.h"
 #include "src/compiler/type-cache.h"
-#include "src/conversions-inl.h"
-#include "src/objects.h"
+#include "src/numbers/conversions-inl.h"
+#include "src/utils/address-map.h"
+#include "src/objects/objects.h"
 
 namespace v8 {
 namespace internal {
@@ -116,7 +116,6 @@ UseInfo CheckedUseInfoAsFloat64FromHint(
     case NumberOperationHint::kSigned32:
       // Not used currently.
       UNREACHABLE();
-      break;
     case NumberOperationHint::kNumber:
       return UseInfo::CheckedNumberAsFloat64(identify_zeros, feedback);
     case NumberOperationHint::kNumberOrOddball:
@@ -132,6 +131,11 @@ UseInfo TruncatingUseInfoFromRepresentation(MachineRepresentation rep) {
     case MachineRepresentation::kTaggedPointer:
     case MachineRepresentation::kTagged:
       return UseInfo::AnyTagged();
+    case MachineRepresentation::kCompressedSigned:
+      return UseInfo::CompressedSigned();
+    case MachineRepresentation::kCompressedPointer:
+    case MachineRepresentation::kCompressed:
+      return UseInfo::AnyCompressed();
     case MachineRepresentation::kFloat64:
       return UseInfo::TruncatingFloat64();
     case MachineRepresentation::kFloat32:
@@ -1041,7 +1045,8 @@ class RepresentationSelector {
                 MachineRepresentation::kTaggedPointer);
       if (lower()) DeferReplacement(node, node->InputAt(0));
     } else {
-      VisitUnop(node, UseInfo::CheckedHeapObjectAsTaggedPointer(),
+      VisitUnop(node,
+                UseInfo::CheckedHeapObjectAsTaggedPointer(VectorSlotPair()),
                 MachineRepresentation::kTaggedPointer);
     }
   }
@@ -1099,6 +1104,10 @@ class RepresentationSelector {
     // Do not distinguish between various Tagged variations.
     if (IsAnyTagged(rep)) {
       return MachineType::AnyTagged();
+    }
+    // Do not distinguish between various Compressed variations.
+    if (IsAnyCompressed(rep)) {
+      return MachineType::AnyCompressed();
     }
     // Word64 representation is only valid for safe integer values.
     if (rep == MachineRepresentation::kWord64) {
@@ -1223,10 +1232,12 @@ class RepresentationSelector {
       MachineRepresentation field_representation, Type field_type,
       MachineRepresentation value_representation, Node* value) {
     if (base_taggedness == kTaggedBase &&
-        CanBeTaggedPointer(field_representation)) {
+        CanBeTaggedOrCompressedPointer(field_representation)) {
       Type value_type = NodeProperties::GetType(value);
       if (field_representation == MachineRepresentation::kTaggedSigned ||
-          value_representation == MachineRepresentation::kTaggedSigned) {
+          value_representation == MachineRepresentation::kTaggedSigned ||
+          field_representation == MachineRepresentation::kCompressedSigned ||
+          value_representation == MachineRepresentation::kCompressedSigned) {
         // Write barriers are only for stores of heap objects.
         return kNoWriteBarrier;
       }
@@ -1248,7 +1259,9 @@ class RepresentationSelector {
         }
       }
       if (field_representation == MachineRepresentation::kTaggedPointer ||
-          value_representation == MachineRepresentation::kTaggedPointer) {
+          value_representation == MachineRepresentation::kTaggedPointer ||
+          field_representation == MachineRepresentation::kCompressedPointer ||
+          value_representation == MachineRepresentation::kCompressedPointer) {
         // Write barriers for heap objects are cheaper.
         return kPointerWriteBarrier;
       }
@@ -1527,9 +1540,10 @@ class RepresentationSelector {
     if (node->op()->ValueOutputCount() > 0 &&
         node->op()->EffectOutputCount() > 0 &&
         node->opcode() != IrOpcode::kUnreachable && TypeOf(node).IsNone()) {
-      Node* control = node->op()->ControlOutputCount() > 0
-                          ? node
-                          : NodeProperties::GetControlInput(node, 0);
+      Node* control =
+          (node->op()->ControlOutputCount() == 0)
+              ? NodeProperties::GetControlInput(node, 0)
+              : NodeProperties::FindSuccessfulControlProjection(node);
 
       Node* unreachable =
           graph()->NewNode(common()->Unreachable(), node, control);
@@ -1537,9 +1551,18 @@ class RepresentationSelector {
       // Insert unreachable node and replace all the effect uses of the {node}
       // with the new unreachable node.
       for (Edge edge : node->use_edges()) {
-        if (NodeProperties::IsEffectEdge(edge) && edge.from() != unreachable) {
-          edge.UpdateTo(unreachable);
+        if (!NodeProperties::IsEffectEdge(edge)) continue;
+        // Make sure to not overwrite the unreachable node's input. That would
+        // create a cycle.
+        if (edge.from() == unreachable) continue;
+        // Avoid messing up the exceptional path.
+        if (edge.from()->opcode() == IrOpcode::kIfException) {
+          DCHECK(!node->op()->HasProperty(Operator::kNoThrow));
+          DCHECK_EQ(NodeProperties::GetControlInput(edge.from()), node);
+          continue;
         }
+
+        edge.UpdateTo(unreachable);
       }
     }
   }
@@ -1556,6 +1579,8 @@ class RepresentationSelector {
         VisitBinop(node, UseInfo::TruncatingWord32(),
                    MachineRepresentation::kWord32);
         if (lower()) {
+          CheckBoundsParameters::Mode mode =
+              CheckBoundsParameters::kDeoptOnOutOfBounds;
           if (lowering->poisoning_level_ ==
                   PoisoningMitigationLevel::kDontPoison &&
               (index_type.IsNone() || length_type.IsNone() ||
@@ -1563,11 +1588,10 @@ class RepresentationSelector {
                 index_type.Max() < length_type.Min()))) {
             // The bounds check is redundant if we already know that
             // the index is within the bounds of [0.0, length[.
-            DeferReplacement(node, node->InputAt(0));
-          } else {
-            NodeProperties::ChangeOp(
-                node, simplified()->CheckedUint32Bounds(p.feedback()));
+            mode = CheckBoundsParameters::kAbortOnOutOfBounds;
           }
+          NodeProperties::ChangeOp(
+              node, simplified()->CheckedUint32Bounds(p.feedback(), mode));
         }
       } else {
         VisitBinop(
@@ -1576,7 +1600,9 @@ class RepresentationSelector {
             UseInfo::TruncatingWord32(), MachineRepresentation::kWord32);
         if (lower()) {
           NodeProperties::ChangeOp(
-              node, simplified()->CheckedUint32Bounds(p.feedback()));
+              node,
+              simplified()->CheckedUint32Bounds(
+                  p.feedback(), CheckBoundsParameters::kDeoptOnOutOfBounds));
         }
       }
     } else {
@@ -1719,6 +1745,10 @@ class RepresentationSelector {
             // BooleanNot(x: kRepTagged) => WordEqual(x, #false)
             node->AppendInput(jsgraph_->zone(), jsgraph_->FalseConstant());
             NodeProperties::ChangeOp(node, lowering->machine()->WordEqual());
+          } else if (CanBeCompressedPointer(input_info->representation())) {
+            // BooleanNot(x: kRepCompressed) => Word32Equal(x, #false)
+            node->AppendInput(jsgraph_->zone(), jsgraph_->FalseConstant());
+            NodeProperties::ChangeOp(node, lowering->machine()->Word32Equal());
           } else {
             DCHECK(TypeOf(node->InputAt(0)).IsNone());
             DeferReplacement(node, lowering->jsgraph()->Int32Constant(0));
@@ -2560,10 +2590,24 @@ class RepresentationSelector {
         }
         return;
       }
-      case IrOpcode::kSameValue: {
-        if (truncation.IsUnused()) return VisitUnused(node);
+      case IrOpcode::kSameValueNumbersOnly: {
         VisitBinop(node, UseInfo::AnyTagged(),
                    MachineRepresentation::kTaggedPointer);
+        return;
+      }
+      case IrOpcode::kSameValue: {
+        if (truncation.IsUnused()) return VisitUnused(node);
+        if (BothInputsAre(node, Type::Number())) {
+          VisitBinop(node, UseInfo::TruncatingFloat64(),
+                     MachineRepresentation::kBit);
+          if (lower()) {
+            NodeProperties::ChangeOp(node,
+                                     lowering->simplified()->NumberSameValue());
+          }
+        } else {
+          VisitBinop(node, UseInfo::AnyTagged(),
+                     MachineRepresentation::kTaggedPointer);
+        }
         return;
       }
       case IrOpcode::kTypeOf: {
@@ -2653,7 +2697,8 @@ class RepresentationSelector {
           VisitUnop(node, UseInfo::AnyTagged(),
                     MachineRepresentation::kTaggedPointer);
         } else {
-          VisitUnop(node, UseInfo::CheckedHeapObjectAsTaggedPointer(),
+          VisitUnop(node,
+                    UseInfo::CheckedHeapObjectAsTaggedPointer(VectorSlotPair()),
                     MachineRepresentation::kTaggedPointer);
         }
         if (lower()) DeferReplacement(node, node->InputAt(0));
@@ -2703,7 +2748,17 @@ class RepresentationSelector {
         return;
       }
       case IrOpcode::kCheckString: {
-        VisitCheck(node, Type::String(), lowering);
+        const CheckParameters& params = CheckParametersOf(node->op());
+        if (InputIs(node, Type::String())) {
+          VisitUnop(node, UseInfo::AnyTagged(),
+                    MachineRepresentation::kTaggedPointer);
+          if (lower()) DeferReplacement(node, node->InputAt(0));
+        } else {
+          VisitUnop(
+              node,
+              UseInfo::CheckedHeapObjectAsTaggedPointer(params.feedback()),
+              MachineRepresentation::kTaggedPointer);
+        }
         return;
       }
       case IrOpcode::kCheckSymbol: {
@@ -2739,9 +2794,9 @@ class RepresentationSelector {
             access.machine_type.representation();
 
         // Convert to Smi if possible, such that we can avoid a write barrier.
-        if (field_representation == MachineRepresentation::kTagged &&
+        if (field_representation == MachineType::RepCompressedTagged() &&
             TypeOf(value_node).Is(Type::SignedSmall())) {
-          field_representation = MachineRepresentation::kTaggedSigned;
+          field_representation = MachineType::RepCompressedTaggedSigned();
         }
         WriteBarrierKind write_barrier_kind = WriteBarrierKindFor(
             access.base_is_tagged, field_representation, access.offset,
@@ -2776,9 +2831,9 @@ class RepresentationSelector {
             access.machine_type.representation();
 
         // Convert to Smi if possible, such that we can avoid a write barrier.
-        if (element_representation == MachineRepresentation::kTagged &&
+        if (element_representation == MachineType::RepCompressedTagged() &&
             TypeOf(value_node).Is(Type::SignedSmall())) {
-          element_representation = MachineRepresentation::kTaggedSigned;
+          element_representation = MachineType::RepCompressedTaggedSigned();
         }
         WriteBarrierKind write_barrier_kind = WriteBarrierKindFor(
             access.base_is_tagged, element_representation, access.type,
@@ -2854,12 +2909,11 @@ class RepresentationSelector {
       case IrOpcode::kLoadDataViewElement: {
         MachineRepresentation const rep =
             MachineRepresentationFromArrayType(ExternalArrayTypeOf(node->op()));
-        ProcessInput(node, 0, UseInfo::AnyTagged());  // buffer
-        ProcessInput(node, 1, UseInfo::Word());       // external pointer
-        ProcessInput(node, 2, UseInfo::Word());       // byte offset
-        ProcessInput(node, 3, UseInfo::Word());       // index
-        ProcessInput(node, 4, UseInfo::Bool());       // little-endian
-        ProcessRemainingInputs(node, 5);
+        ProcessInput(node, 0, UseInfo::AnyTagged());  // object
+        ProcessInput(node, 1, UseInfo::Word());       // base
+        ProcessInput(node, 2, UseInfo::Word());       // index
+        ProcessInput(node, 3, UseInfo::Bool());       // little-endian
+        ProcessRemainingInputs(node, 4);
         SetOutput(node, rep);
         return;
       }
@@ -2879,14 +2933,13 @@ class RepresentationSelector {
       case IrOpcode::kStoreDataViewElement: {
         MachineRepresentation const rep =
             MachineRepresentationFromArrayType(ExternalArrayTypeOf(node->op()));
-        ProcessInput(node, 0, UseInfo::AnyTagged());         // buffer
-        ProcessInput(node, 1, UseInfo::Word());              // external pointer
-        ProcessInput(node, 2, UseInfo::Word());              // byte offset
-        ProcessInput(node, 3, UseInfo::Word());              // index
-        ProcessInput(node, 4,
+        ProcessInput(node, 0, UseInfo::AnyTagged());  // object
+        ProcessInput(node, 1, UseInfo::Word());       // base
+        ProcessInput(node, 2, UseInfo::Word());       // index
+        ProcessInput(node, 3,
                      TruncatingUseInfoFromRepresentation(rep));  // value
-        ProcessInput(node, 5, UseInfo::Bool());  // little-endian
-        ProcessRemainingInputs(node, 6);
+        ProcessInput(node, 4, UseInfo::Bool());  // little-endian
+        ProcessRemainingInputs(node, 5);
         SetOutput(node, MachineRepresentation::kNone);
         return;
       }
@@ -3166,8 +3219,7 @@ class RepresentationSelector {
       }
       case IrOpcode::kNewDoubleElements:
       case IrOpcode::kNewSmiOrObjectElements: {
-        VisitUnop(node, UseInfo::TruncatingWord32(),
-                  MachineRepresentation::kTaggedPointer);
+        VisitUnop(node, UseInfo::Word(), MachineRepresentation::kTaggedPointer);
         return;
       }
       case IrOpcode::kNewArgumentsElements: {
@@ -3233,14 +3285,21 @@ class RepresentationSelector {
       case IrOpcode::kMapGuard:
         // Eliminate MapGuard nodes here.
         return VisitUnused(node);
-      case IrOpcode::kCheckMaps:
+      case IrOpcode::kCheckMaps: {
+        CheckMapsParameters const& p = CheckMapsParametersOf(node->op());
+        return VisitUnop(
+            node, UseInfo::CheckedHeapObjectAsTaggedPointer(p.feedback()),
+            MachineRepresentation::kNone);
+      }
       case IrOpcode::kTransitionElementsKind: {
-        VisitInputs(node);
-        return SetOutput(node, MachineRepresentation::kNone);
+        return VisitUnop(
+            node, UseInfo::CheckedHeapObjectAsTaggedPointer(VectorSlotPair()),
+            MachineRepresentation::kNone);
       }
       case IrOpcode::kCompareMaps:
-        return VisitUnop(node, UseInfo::AnyTagged(),
-                         MachineRepresentation::kBit);
+        return VisitUnop(
+            node, UseInfo::CheckedHeapObjectAsTaggedPointer(VectorSlotPair()),
+            MachineRepresentation::kBit);
       case IrOpcode::kEnsureWritableFastElements:
         return VisitBinop(node, UseInfo::AnyTagged(),
                           MachineRepresentation::kTaggedPointer);
@@ -3370,6 +3429,8 @@ class RepresentationSelector {
       case IrOpcode::kDeadValue:
         ProcessInput(node, 0, UseInfo::Any());
         return SetOutput(node, MachineRepresentation::kNone);
+      case IrOpcode::kStaticAssert:
+        return VisitUnop(node, UseInfo::Any(), MachineRepresentation::kTagged);
       default:
         FATAL(
             "Representation inference: unsupported opcode %i (%s), node #%i\n.",

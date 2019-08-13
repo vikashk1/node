@@ -27,15 +27,15 @@
 
 #include <iostream>  // NOLINT(readability/streams)
 
-#include "src/assembler-inl.h"
 #include "src/base/utils/random-number-generator.h"
-#include "src/disassembler.h"
-#include "src/double.h"
+#include "src/codegen/assembler-inl.h"
+#include "src/codegen/macro-assembler.h"
+#include "src/diagnostics/disassembler.h"
+#include "src/execution/simulator.h"
 #include "src/heap/factory.h"
-#include "src/macro-assembler.h"
-#include "src/ostreams.h"
-#include "src/simulator.h"
-#include "src/v8.h"
+#include "src/init/v8.h"
+#include "src/numbers/double.h"
+#include "src/utils/ostreams.h"
 #include "test/cctest/assembler-helper-arm.h"
 #include "test/cctest/cctest.h"
 #include "test/cctest/compiler/value-helper.h"
@@ -60,8 +60,7 @@ TEST(0) {
 
   CodeDesc desc;
   assm.GetCode(isolate, &desc);
-  Handle<Code> code =
-      isolate->factory()->NewCode(desc, Code::STUB, Handle<Code>());
+  Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
 #ifdef DEBUG
   StdoutStream os;
   code->Print(os);
@@ -96,8 +95,7 @@ TEST(1) {
 
   CodeDesc desc;
   assm.GetCode(isolate, &desc);
-  Handle<Code> code =
-      isolate->factory()->NewCode(desc, Code::STUB, Handle<Code>());
+  Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
 #ifdef DEBUG
   StdoutStream os;
   code->Print(os);
@@ -141,8 +139,7 @@ TEST(2) {
 
   CodeDesc desc;
   assm.GetCode(isolate, &desc);
-  Handle<Code> code =
-      isolate->factory()->NewCode(desc, Code::STUB, Handle<Code>());
+  Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
 #ifdef DEBUG
   StdoutStream os;
   code->Print(os);
@@ -159,15 +156,14 @@ TEST(3) {
   Isolate* isolate = CcTest::i_isolate();
   HandleScope scope(isolate);
 
-  typedef struct {
+  struct T {
     int i;
     char c;
     int16_t s;
-  } T;
+  };
   T t;
 
   Assembler assm(AssemblerOptions{});
-  Label L, C;
 
   __ mov(ip, Operand(sp));
   __ stm(db_w, sp, r4.bit() | fp.bit() | lr.bit());
@@ -188,8 +184,7 @@ TEST(3) {
 
   CodeDesc desc;
   assm.GetCode(isolate, &desc);
-  Handle<Code> code =
-      isolate->factory()->NewCode(desc, Code::STUB, Handle<Code>());
+  Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
 #ifdef DEBUG
   StdoutStream os;
   code->Print(os);
@@ -213,7 +208,7 @@ TEST(4) {
   Isolate* isolate = CcTest::i_isolate();
   HandleScope scope(isolate);
 
-  typedef struct {
+  struct T {
     double a;
     double b;
     double c;
@@ -230,13 +225,12 @@ TEST(4) {
     float p;
     float x;
     float y;
-  } T;
+  };
   T t;
 
   // Create a function that accepts &t, and loads, manipulates, and stores
   // the doubles and floats.
   Assembler assm(AssemblerOptions{});
-  Label L, C;
 
   if (CpuFeatures::IsSupported(VFPv3)) {
     CpuFeatureScope scope(&assm, VFPv3);
@@ -319,8 +313,7 @@ TEST(4) {
 
     CodeDesc desc;
     assm.GetCode(isolate, &desc);
-    Handle<Code> code =
-        isolate->factory()->NewCode(desc, Code::STUB, Handle<Code>());
+    Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
 #ifdef DEBUG
     StdoutStream os;
     code->Print(os);
@@ -381,8 +374,7 @@ TEST(5) {
 
     CodeDesc desc;
     assm.GetCode(isolate, &desc);
-    Handle<Code> code =
-        isolate->factory()->NewCode(desc, Code::STUB, Handle<Code>());
+    Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
 #ifdef DEBUG
     StdoutStream os;
     code->Print(os);
@@ -412,8 +404,7 @@ TEST(6) {
 
   CodeDesc desc;
   assm.GetCode(isolate, &desc);
-  Handle<Code> code =
-      isolate->factory()->NewCode(desc, Code::STUB, Handle<Code>());
+  Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
 #ifdef DEBUG
   StdoutStream os;
   code->Print(os);
@@ -461,7 +452,6 @@ static void TestRoundingMode(VCVTTypes types,
 
     default:
       UNREACHABLE();
-      break;
   }
   // Check for vfp exceptions
   __ vmrs(r2);
@@ -480,8 +470,7 @@ static void TestRoundingMode(VCVTTypes types,
 
   CodeDesc desc;
   assm.GetCode(isolate, &desc);
-  Handle<Code> code =
-      isolate->factory()->NewCode(desc, Code::STUB, Handle<Code>());
+  Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
 #ifdef DEBUG
   StdoutStream os;
   code->Print(os);
@@ -610,7 +599,7 @@ TEST(8) {
   Isolate* isolate = CcTest::i_isolate();
   HandleScope scope(isolate);
 
-  typedef struct {
+  struct D {
     double a;
     double b;
     double c;
@@ -619,10 +608,10 @@ TEST(8) {
     double f;
     double g;
     double h;
-  } D;
+  };
   D d;
 
-  typedef struct {
+  struct F {
     float a;
     float b;
     float c;
@@ -631,7 +620,7 @@ TEST(8) {
     float f;
     float g;
     float h;
-  } F;
+  };
   F f;
 
   // Create a function that uses vldm/vstm to move some double and
@@ -662,8 +651,7 @@ TEST(8) {
 
   CodeDesc desc;
   assm.GetCode(isolate, &desc);
-  Handle<Code> code =
-      isolate->factory()->NewCode(desc, Code::STUB, Handle<Code>());
+  Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
 #ifdef DEBUG
   StdoutStream os;
   code->Print(os);
@@ -715,7 +703,7 @@ TEST(9) {
   Isolate* isolate = CcTest::i_isolate();
   HandleScope scope(isolate);
 
-  typedef struct {
+  struct D {
     double a;
     double b;
     double c;
@@ -724,10 +712,10 @@ TEST(9) {
     double f;
     double g;
     double h;
-  } D;
+  };
   D d;
 
-  typedef struct {
+  struct F {
     float a;
     float b;
     float c;
@@ -736,7 +724,7 @@ TEST(9) {
     float f;
     float g;
     float h;
-  } F;
+  };
   F f;
 
   // Create a function that uses vldm/vstm to move some double and
@@ -771,8 +759,7 @@ TEST(9) {
 
   CodeDesc desc;
   assm.GetCode(isolate, &desc);
-  Handle<Code> code =
-      isolate->factory()->NewCode(desc, Code::STUB, Handle<Code>());
+  Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
 #ifdef DEBUG
   StdoutStream os;
   code->Print(os);
@@ -824,7 +811,7 @@ TEST(10) {
   Isolate* isolate = CcTest::i_isolate();
   HandleScope scope(isolate);
 
-  typedef struct {
+  struct D {
     double a;
     double b;
     double c;
@@ -833,10 +820,10 @@ TEST(10) {
     double f;
     double g;
     double h;
-  } D;
+  };
   D d;
 
-  typedef struct {
+  struct F {
     float a;
     float b;
     float c;
@@ -845,7 +832,7 @@ TEST(10) {
     float f;
     float g;
     float h;
-  } F;
+  };
   F f;
 
   // Create a function that uses vldm/vstm to move some double and
@@ -876,8 +863,7 @@ TEST(10) {
 
   CodeDesc desc;
   assm.GetCode(isolate, &desc);
-  Handle<Code> code =
-      isolate->factory()->NewCode(desc, Code::STUB, Handle<Code>());
+  Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
 #ifdef DEBUG
   StdoutStream os;
   code->Print(os);
@@ -929,12 +915,12 @@ TEST(11) {
   Isolate* isolate = CcTest::i_isolate();
   HandleScope scope(isolate);
 
-  typedef struct {
+  struct I {
     int32_t a;
     int32_t b;
     int32_t c;
     int32_t d;
-  } I;
+  };
   I i;
 
   i.a = 0xABCD0001;
@@ -970,8 +956,7 @@ TEST(11) {
 
   CodeDesc desc;
   assm.GetCode(isolate, &desc);
-  Handle<Code> code =
-      isolate->factory()->NewCode(desc, Code::STUB, Handle<Code>());
+  Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
 #ifdef DEBUG
   StdoutStream os;
   code->Print(os);
@@ -1011,7 +996,7 @@ TEST(13) {
     return;
   }
 
-  typedef struct {
+  struct T {
     double a;
     double b;
     double c;
@@ -1023,13 +1008,12 @@ TEST(13) {
     double k;
     uint32_t low;
     uint32_t high;
-  } T;
+  };
   T t;
 
   // Create a function that accepts &t, and loads, manipulates, and stores
   // the doubles and floats.
   Assembler assm(AssemblerOptions{});
-  Label L, C;
 
   if (CpuFeatures::IsSupported(VFPv3)) {
     CpuFeatureScope scope(&assm, VFPv3);
@@ -1096,8 +1080,7 @@ TEST(13) {
 
     CodeDesc desc;
     assm.GetCode(isolate, &desc);
-    Handle<Code> code =
-        isolate->factory()->NewCode(desc, Code::STUB, Handle<Code>());
+    Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
 #ifdef DEBUG
     StdoutStream os;
     code->Print(os);
@@ -1131,14 +1114,14 @@ TEST(14) {
   Isolate* isolate = CcTest::i_isolate();
   HandleScope scope(isolate);
 
-  typedef struct {
+  struct T {
     double left;
     double right;
     double add_result;
     double sub_result;
     double mul_result;
     double div_result;
-  } T;
+  };
   T t;
 
   // Create a function that makes the four basic operations.
@@ -1168,8 +1151,7 @@ TEST(14) {
 
   CodeDesc desc;
   assm.GetCode(isolate, &desc);
-  Handle<Code> code =
-      isolate->factory()->NewCode(desc, Code::STUB, Handle<Code>());
+  Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
 #ifdef DEBUG
   StdoutStream os;
   code->Print(os);
@@ -1242,7 +1224,7 @@ TEST(15) {
   Isolate* isolate = CcTest::i_isolate();
   HandleScope scope(isolate);
 
-  typedef struct {
+  struct T {
     uint32_t src0;
     uint32_t src1;
     uint32_t src2;
@@ -1316,7 +1298,7 @@ TEST(15) {
     uint32_t vtrnd8a[2], vtrnd8b[2], vtrnd16a[2], vtrnd16b[2], vtrnd32a[2],
         vtrnd32b[2];
     uint32_t vtbl[2], vtbx[2];
-  } T;
+  };
   T t;
 
   // Create a function that accepts &t, and loads, manipulates, and stores
@@ -2048,8 +2030,7 @@ TEST(15) {
 
     CodeDesc desc;
     assm.GetCode(isolate, &desc);
-    Handle<Code> code =
-        isolate->factory()->NewCode(desc, Code::STUB, Handle<Code>());
+    Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
 #ifdef DEBUG
     StdoutStream os;
     code->Print(os);
@@ -2282,7 +2263,7 @@ TEST(16) {
   Isolate* isolate = CcTest::i_isolate();
   HandleScope scope(isolate);
 
-  typedef struct {
+  struct T {
     uint32_t src0;
     uint32_t src1;
     uint32_t src2;
@@ -2291,7 +2272,7 @@ TEST(16) {
     uint32_t dst2;
     uint32_t dst3;
     uint32_t dst4;
-  } T;
+  };
   T t;
 
   // Create a function that accepts &t, and loads, manipulates, and stores
@@ -2324,8 +2305,7 @@ TEST(16) {
 
   CodeDesc desc;
   assm.GetCode(isolate, &desc);
-  Handle<Code> code =
-      isolate->factory()->NewCode(desc, Code::STUB, Handle<Code>());
+  Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
 #ifdef DEBUG
   StdoutStream os;
   code->Print(os);
@@ -2402,8 +2382,7 @@ TEST(sdiv) {
 
     CodeDesc desc;
     assm.GetCode(isolate, &desc);
-    Handle<Code> code =
-        isolate->factory()->NewCode(desc, Code::STUB, Handle<Code>());
+    Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
 #ifdef DEBUG
     StdoutStream os;
     code->Print(os);
@@ -2462,8 +2441,7 @@ TEST(udiv) {
 
     CodeDesc desc;
     assm.GetCode(isolate, &desc);
-    Handle<Code> code =
-        isolate->factory()->NewCode(desc, Code::STUB, Handle<Code>());
+    Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
 #ifdef DEBUG
     StdoutStream os;
     code->Print(os);
@@ -2491,8 +2469,7 @@ TEST(smmla) {
   __ bx(lr);
   CodeDesc desc;
   assm.GetCode(isolate, &desc);
-  Handle<Code> code =
-      isolate->factory()->NewCode(desc, Code::STUB, Handle<Code>());
+  Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
 #ifdef OBJECT_PRINT
   code->Print(std::cout);
 #endif
@@ -2516,8 +2493,7 @@ TEST(smmul) {
   __ bx(lr);
   CodeDesc desc;
   assm.GetCode(isolate, &desc);
-  Handle<Code> code =
-      isolate->factory()->NewCode(desc, Code::STUB, Handle<Code>());
+  Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
 #ifdef OBJECT_PRINT
   code->Print(std::cout);
 #endif
@@ -2541,8 +2517,7 @@ TEST(sxtb) {
   __ bx(lr);
   CodeDesc desc;
   assm.GetCode(isolate, &desc);
-  Handle<Code> code =
-      isolate->factory()->NewCode(desc, Code::STUB, Handle<Code>());
+  Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
 #ifdef OBJECT_PRINT
   code->Print(std::cout);
 #endif
@@ -2566,8 +2541,7 @@ TEST(sxtab) {
   __ bx(lr);
   CodeDesc desc;
   assm.GetCode(isolate, &desc);
-  Handle<Code> code =
-      isolate->factory()->NewCode(desc, Code::STUB, Handle<Code>());
+  Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
 #ifdef OBJECT_PRINT
   code->Print(std::cout);
 #endif
@@ -2591,8 +2565,7 @@ TEST(sxth) {
   __ bx(lr);
   CodeDesc desc;
   assm.GetCode(isolate, &desc);
-  Handle<Code> code =
-      isolate->factory()->NewCode(desc, Code::STUB, Handle<Code>());
+  Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
 #ifdef OBJECT_PRINT
   code->Print(std::cout);
 #endif
@@ -2616,8 +2589,7 @@ TEST(sxtah) {
   __ bx(lr);
   CodeDesc desc;
   assm.GetCode(isolate, &desc);
-  Handle<Code> code =
-      isolate->factory()->NewCode(desc, Code::STUB, Handle<Code>());
+  Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
 #ifdef OBJECT_PRINT
   code->Print(std::cout);
 #endif
@@ -2641,8 +2613,7 @@ TEST(uxtb) {
   __ bx(lr);
   CodeDesc desc;
   assm.GetCode(isolate, &desc);
-  Handle<Code> code =
-      isolate->factory()->NewCode(desc, Code::STUB, Handle<Code>());
+  Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
 #ifdef OBJECT_PRINT
   code->Print(std::cout);
 #endif
@@ -2666,8 +2637,7 @@ TEST(uxtab) {
   __ bx(lr);
   CodeDesc desc;
   assm.GetCode(isolate, &desc);
-  Handle<Code> code =
-      isolate->factory()->NewCode(desc, Code::STUB, Handle<Code>());
+  Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
 #ifdef OBJECT_PRINT
   code->Print(std::cout);
 #endif
@@ -2691,8 +2661,7 @@ TEST(uxth) {
   __ bx(lr);
   CodeDesc desc;
   assm.GetCode(isolate, &desc);
-  Handle<Code> code =
-      isolate->factory()->NewCode(desc, Code::STUB, Handle<Code>());
+  Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
 #ifdef OBJECT_PRINT
   code->Print(std::cout);
 #endif
@@ -2716,8 +2685,7 @@ TEST(uxtah) {
   __ bx(lr);
   CodeDesc desc;
   assm.GetCode(isolate, &desc);
-  Handle<Code> code =
-      isolate->factory()->NewCode(desc, Code::STUB, Handle<Code>());
+  Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
 #ifdef OBJECT_PRINT
   code->Print(std::cout);
 #endif
@@ -2744,10 +2712,10 @@ TEST(rbit) {
   if (CpuFeatures::IsSupported(ARMv7)) {
     CpuFeatureScope scope(&assm, ARMv7);
 
-    typedef struct {
+    struct T {
       uint32_t input;
       uint32_t result;
-    } T;
+    };
     T t;
 
     __ ldr(r1, MemOperand(r0, offsetof(T, input)));
@@ -2757,8 +2725,7 @@ TEST(rbit) {
 
     CodeDesc desc;
     assm.GetCode(isolate, &desc);
-    Handle<Code> code =
-        isolate->factory()->NewCode(desc, Code::STUB, Handle<Code>());
+    Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
 
 #ifdef OBJECT_PRINT
     code->Print(std::cout);
@@ -2838,8 +2805,9 @@ TEST(code_relative_offset) {
 
   CodeDesc desc;
   assm.GetCode(isolate, &desc);
-  Handle<Code> code =
-      isolate->factory()->NewCode(desc, Code::STUB, code_object);
+  Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB)
+                          .set_self_reference(code_object)
+                          .Build();
   auto f = GeneratedCode<F_iiiii>::FromCode(*code);
   int res = reinterpret_cast<int>(f.Call(21, 0, 0, 0, 0));
   ::printf("f() = %d\n", res);
@@ -2877,8 +2845,7 @@ TEST(msr_mrs) {
 
   CodeDesc desc;
   assm.GetCode(isolate, &desc);
-  Handle<Code> code =
-      isolate->factory()->NewCode(desc, Code::STUB, Handle<Code>());
+  Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
 #ifdef DEBUG
   StdoutStream os;
   code->Print(os);
@@ -2922,20 +2889,19 @@ TEST(ARMv8_float32_vrintX) {
   Isolate* isolate = CcTest::i_isolate();
   HandleScope scope(isolate);
 
-  typedef struct {
+  struct T {
     float input;
     float ar;
     float nr;
     float mr;
     float pr;
     float zr;
-  } T;
+  };
   T t;
 
   // Create a function that accepts &t, and loads, manipulates, and stores
   // the floats.
   Assembler assm(AssemblerOptions{});
-  Label L, C;
 
 
   if (CpuFeatures::IsSupported(ARMv8)) {
@@ -2975,8 +2941,7 @@ TEST(ARMv8_float32_vrintX) {
 
     CodeDesc desc;
     assm.GetCode(isolate, &desc);
-    Handle<Code> code =
-        isolate->factory()->NewCode(desc, Code::STUB, Handle<Code>());
+    Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
 #ifdef DEBUG
     StdoutStream os;
     code->Print(os);
@@ -3024,20 +2989,19 @@ TEST(ARMv8_vrintX) {
   Isolate* isolate = CcTest::i_isolate();
   HandleScope scope(isolate);
 
-  typedef struct {
+  struct T {
     double input;
     double ar;
     double nr;
     double mr;
     double pr;
     double zr;
-  } T;
+  };
   T t;
 
   // Create a function that accepts &t, and loads, manipulates, and stores
   // the doubles and floats.
   Assembler assm(AssemblerOptions{});
-  Label L, C;
 
 
   if (CpuFeatures::IsSupported(ARMv8)) {
@@ -3077,8 +3041,7 @@ TEST(ARMv8_vrintX) {
 
     CodeDesc desc;
     assm.GetCode(isolate, &desc);
-    Handle<Code> code =
-        isolate->factory()->NewCode(desc, Code::STUB, Handle<Code>());
+    Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
 #ifdef DEBUG
     StdoutStream os;
     code->Print(os);
@@ -3214,8 +3177,7 @@ TEST(ARMv8_vsel) {
 
     CodeDesc desc;
     assm.GetCode(isolate, &desc);
-    Handle<Code> code =
-        isolate->factory()->NewCode(desc, Code::STUB, Handle<Code>());
+    Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
 #ifdef DEBUG
     StdoutStream os;
     code->Print(os);
@@ -3305,8 +3267,7 @@ TEST(ARMv8_vminmax_f64) {
 
     CodeDesc desc;
     assm.GetCode(isolate, &desc);
-    Handle<Code> code =
-        isolate->factory()->NewCode(desc, Code::STUB, Handle<Code>());
+    Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
 #ifdef DEBUG
     StdoutStream os;
     code->Print(os);
@@ -3385,8 +3346,7 @@ TEST(ARMv8_vminmax_f32) {
 
     CodeDesc desc;
     assm.GetCode(isolate, &desc);
-    Handle<Code> code =
-        isolate->factory()->NewCode(desc, Code::STUB, Handle<Code>());
+    Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
 #ifdef DEBUG
     StdoutStream os;
     code->Print(os);
@@ -3516,7 +3476,7 @@ static GeneratedCode<F_ppiii> GenerateMacroFloatMinMax(MacroAssembler& assm) {
   CodeDesc desc;
   assm.GetCode(assm.isolate(), &desc);
   Handle<Code> code =
-      assm.isolate()->factory()->NewCode(desc, Code::STUB, Handle<Code>());
+      Factory::CodeBuilder(assm.isolate(), desc, Code::STUB).Build();
 #ifdef DEBUG
   StdoutStream os;
   code->Print(os);
@@ -3660,11 +3620,11 @@ TEST(unaligned_loads) {
   Isolate* isolate = CcTest::i_isolate();
   HandleScope scope(isolate);
 
-  typedef struct {
+  struct T {
     uint32_t ldrh;
     uint32_t ldrsh;
     uint32_t ldr;
-  } T;
+  };
   T t;
 
   Assembler assm(AssemblerOptions{});
@@ -3678,8 +3638,7 @@ TEST(unaligned_loads) {
 
   CodeDesc desc;
   assm.GetCode(isolate, &desc);
-  Handle<Code> code =
-      isolate->factory()->NewCode(desc, Code::STUB, Handle<Code>());
+  Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
 #ifdef DEBUG
   StdoutStream os;
   code->Print(os);
@@ -3721,8 +3680,7 @@ TEST(unaligned_stores) {
 
   CodeDesc desc;
   assm.GetCode(isolate, &desc);
-  Handle<Code> code =
-      isolate->factory()->NewCode(desc, Code::STUB, Handle<Code>());
+  Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
 #ifdef DEBUG
   StdoutStream os;
   code->Print(os);
@@ -3770,14 +3728,14 @@ TEST(vswp) {
   HandleScope scope(isolate);
   Assembler assm(AssemblerOptions{});
 
-  typedef struct {
+  struct T {
     uint64_t vswp_d0;
     uint64_t vswp_d1;
     uint64_t vswp_d30;
     uint64_t vswp_d31;
     uint32_t vswp_q4[4];
     uint32_t vswp_q5[4];
-  } T;
+  };
   T t;
 
   __ stm(db_w, sp, r4.bit() | r5.bit() | r6.bit() | r7.bit() | lr.bit());
@@ -3821,8 +3779,7 @@ TEST(vswp) {
 
   CodeDesc desc;
   assm.GetCode(isolate, &desc);
-  Handle<Code> code =
-      isolate->factory()->NewCode(desc, Code::STUB, Handle<Code>());
+  Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
 #ifdef DEBUG
   StdoutStream os;
   code->Print(os);
@@ -4033,8 +3990,7 @@ TEST(split_add_immediate) {
 
     CodeDesc desc;
     assm.GetCode(isolate, &desc);
-    Handle<Code> code =
-        isolate->factory()->NewCode(desc, Code::STUB, Handle<Code>());
+    Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
 #ifdef DEBUG
     StdoutStream os;
     code->Print(os);
@@ -4053,8 +4009,7 @@ TEST(split_add_immediate) {
 
     CodeDesc desc;
     assm.GetCode(isolate, &desc);
-    Handle<Code> code =
-        isolate->factory()->NewCode(desc, Code::STUB, Handle<Code>());
+    Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
 #ifdef DEBUG
     StdoutStream os;
     code->Print(os);
@@ -4076,8 +4031,7 @@ TEST(split_add_immediate) {
 
     CodeDesc desc;
     assm.GetCode(isolate, &desc);
-    Handle<Code> code =
-        isolate->factory()->NewCode(desc, Code::STUB, Handle<Code>());
+    Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
 #ifdef DEBUG
     StdoutStream os;
     code->Print(os);
@@ -4094,18 +4048,18 @@ namespace {
 std::vector<Float32> Float32Inputs() {
   std::vector<Float32> inputs;
   FOR_FLOAT32_INPUTS(f) {
-    inputs.push_back(Float32::FromBits(bit_cast<uint32_t>(*f)));
+    inputs.push_back(Float32::FromBits(bit_cast<uint32_t>(f)));
   }
-  FOR_UINT32_INPUTS(bits) { inputs.push_back(Float32::FromBits(*bits)); }
+  FOR_UINT32_INPUTS(bits) { inputs.push_back(Float32::FromBits(bits)); }
   return inputs;
 }
 
 std::vector<Float64> Float64Inputs() {
   std::vector<Float64> inputs;
   FOR_FLOAT64_INPUTS(f) {
-    inputs.push_back(Float64::FromBits(bit_cast<uint64_t>(*f)));
+    inputs.push_back(Float64::FromBits(bit_cast<uint64_t>(f)));
   }
-  FOR_UINT64_INPUTS(bits) { inputs.push_back(Float64::FromBits(*bits)); }
+  FOR_UINT64_INPUTS(bits) { inputs.push_back(Float64::FromBits(bits)); }
   return inputs;
 }
 
@@ -4186,6 +4140,81 @@ TEST(vneg_64) {
     CHECK_EQ(exp.get_bits() >> 32, res);
   }
 }
+
+TEST(move_pair) {
+  Isolate* isolate = CcTest::i_isolate();
+  HandleScope scope(isolate);
+
+  auto f = AssembleCode<F_piiii>([](MacroAssembler& assm) {
+    RegList used_callee_saved =
+        r4.bit() | r5.bit() | r6.bit() | r7.bit() | r8.bit();
+    __ stm(db_w, sp, used_callee_saved);
+
+    // Save output register bank pointer to r8.
+    __ mov(r8, r0);
+
+    __ mov(r0, Operand(0xabababab));
+    __ mov(r1, Operand(0xbabababa));
+    __ mov(r2, Operand(0x12341234));
+    __ mov(r3, Operand(0x43214321));
+
+    // No overlap:
+    //  r4 <- r0
+    //  r5 <- r1
+    __ MovePair(r4, r0, r5, r1);
+
+    // Overlap but we can swap moves:
+    //  r2 <- r0
+    //  r6 <- r2
+    __ MovePair(r2, r0, r6, r2);
+
+    // Overlap but can be done:
+    //  r7 <- r3
+    //  r3 <- r0
+    __ MovePair(r7, r3, r3, r0);
+
+    // Swap.
+    //  r0 <- r1
+    //  r1 <- r0
+    __ MovePair(r0, r1, r1, r0);
+
+    // Fill the fake register bank.
+    __ str(r0, MemOperand(r8, 0 * kPointerSize));
+    __ str(r1, MemOperand(r8, 1 * kPointerSize));
+    __ str(r2, MemOperand(r8, 2 * kPointerSize));
+    __ str(r3, MemOperand(r8, 3 * kPointerSize));
+    __ str(r4, MemOperand(r8, 4 * kPointerSize));
+    __ str(r5, MemOperand(r8, 5 * kPointerSize));
+    __ str(r6, MemOperand(r8, 6 * kPointerSize));
+    __ str(r7, MemOperand(r8, 7 * kPointerSize));
+
+    __ ldm(ia_w, sp, used_callee_saved);
+  });
+
+  // Create a fake register bank.
+  uint32_t r[] = {0, 0, 0, 0, 0, 0, 0, 0};
+  f.Call(r, 0, 0, 0, 0);
+
+  //  r4 <- r0
+  //  r5 <- r1
+  CHECK_EQ(0xabababab, r[4]);
+  CHECK_EQ(0xbabababa, r[5]);
+
+  //  r2 <- r0
+  //  r6 <- r2
+  CHECK_EQ(0xabababab, r[2]);
+  CHECK_EQ(0x12341234, r[6]);
+
+  //  r7 <- r3
+  //  r3 <- r0
+  CHECK_EQ(0x43214321, r[7]);
+  CHECK_EQ(0xabababab, r[3]);
+
+  // r0 and r1 should be swapped.
+  CHECK_EQ(0xbabababa, r[0]);
+  CHECK_EQ(0xabababab, r[1]);
+}
+
 
 #undef __
 

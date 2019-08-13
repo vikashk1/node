@@ -4,7 +4,6 @@
 
 // Flags: --experimental-wasm-eh --experimental-wasm-anyref --allow-natives-syntax
 
-load("test/mjsunit/wasm/wasm-constants.js");
 load("test/mjsunit/wasm/wasm-module-builder.js");
 load("test/mjsunit/wasm/exceptions-utils.js");
 
@@ -95,6 +94,51 @@ load("test/mjsunit/wasm/exceptions-utils.js");
   let o = new Object();
 
   assertEquals(o, instance.exports.throw_catch_param(o));
+  assertEquals(1, instance.exports.throw_catch_param(1));
+  assertEquals(2.3, instance.exports.throw_catch_param(2.3));
+  assertEquals("str", instance.exports.throw_catch_param("str"));
+})();
+
+// Test throwing/catching a function reference type value.
+(function TestThrowCatchAnyFunc() {
+  print(arguments.callee.name);
+  let builder = new WasmModuleBuilder();
+  let except = builder.addException(kSig_v_a);
+  builder.addFunction("throw_catch_local", kSig_r_v)
+      .addLocals({anyfunc_count: 1})
+      .addBody([
+        kExprTry, kWasmAnyFunc,
+          kExprGetLocal, 0,
+          kExprThrow, except,
+        kExprCatch,
+          kExprBrOnExn, 0, except,
+          kExprRethrow,
+        kExprEnd,
+      ]).exportFunc();
+  let instance = builder.instantiate();
+
+  assertEquals(null, instance.exports.throw_catch_local());
+})();
+
+// Test throwing/catching an encapsulated exception type value.
+(function TestThrowCatchExceptRef() {
+  print(arguments.callee.name);
+  let builder = new WasmModuleBuilder();
+  let except = builder.addException(kSig_v_e);
+  builder.addFunction("throw_catch_param", kSig_e_e)
+      .addBody([
+        kExprTry, kWasmExceptRef,
+          kExprGetLocal, 0,
+          kExprThrow, except,
+        kExprCatch,
+          kExprBrOnExn, 0, except,
+          kExprRethrow,
+        kExprEnd,
+      ]).exportFunc();
+  let instance = builder.instantiate();
+  let e = new Error("my encapsulated error");
+
+  assertEquals(e, instance.exports.throw_catch_param(e));
   assertEquals(1, instance.exports.throw_catch_param(1));
   assertEquals(2.3, instance.exports.throw_catch_param(2.3));
   assertEquals("str", instance.exports.throw_catch_param("str"));

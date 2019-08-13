@@ -38,6 +38,14 @@ function validate() {
 }
 
 {
+  // Test with an error with one line stack
+  const error = new Error();
+  error.stack = 'only one line';
+  process.report.writeReport(error);
+  validate();
+}
+
+{
   // Test with a file argument.
   const file = process.report.writeReport('custom-name-1.json');
   const absolutePath = path.join(tmpdir.path, file);
@@ -111,7 +119,7 @@ function validate() {
   // Test the case where the report file cannot be opened.
   const reportDir = path.join(tmpdir.path, 'does', 'not', 'exist');
   const args = ['--experimental-report',
-                `--diagnostic-report-directory=${reportDir}`,
+                `--report-directory=${reportDir}`,
                 '-e',
                 'process.report.writeReport()'];
   const child = spawnSync(process.execPath, args, { cwd: tmpdir.path });

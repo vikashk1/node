@@ -2,8 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "src/heap/heap.h"
-#include "src/roots-inl.h"
+#include "src/heap/heap-inl.h"
+#include "src/objects/cell.h"
+#include "src/objects/feedback-cell.h"
+#include "src/objects/script.h"
+#include "src/roots/roots-inl.h"
 #include "test/cctest/cctest.h"
 
 namespace v8 {
@@ -11,7 +14,7 @@ namespace internal {
 
 namespace {
 AllocationSpace GetSpaceFromObject(Object object) {
-  DCHECK(object->IsHeapObject());
+  DCHECK(object.IsHeapObject());
   return MemoryChunk::FromHeapObject(HeapObject::cast(object))
       ->owner()
       ->identity();
@@ -42,7 +45,7 @@ bool IsInitiallyMutable(Factory* factory, Address object_address) {
   V(builtins_constants_table)             \
   V(current_microtask)                    \
   V(detached_contexts)                    \
-  V(dirty_js_weak_factories)              \
+  V(dirty_js_finalization_groups)         \
   V(feedback_vectors_for_profiling_tools) \
   V(materialized_objects)                 \
   V(noscript_shared_function_infos)       \

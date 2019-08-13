@@ -7,9 +7,10 @@
 
 #include "src/objects/api-callbacks.h"
 
-#include "src/heap/heap-inl.h"
+#include "src/heap/heap-write-barrier-inl.h"
 #include "src/heap/heap-write-barrier.h"
 #include "src/objects/foreign-inl.h"
+#include "src/objects/js-objects-inl.h"
 #include "src/objects/name.h"
 #include "src/objects/templates.h"
 
@@ -37,7 +38,7 @@ ACCESSORS(AccessorInfo, expected_receiver_type, Object,
 ACCESSORS_CHECKED2(AccessorInfo, getter, Object, kGetterOffset, true,
                    Foreign::IsNormalized(value))
 ACCESSORS_CHECKED2(AccessorInfo, setter, Object, kSetterOffset, true,
-                   Foreign::IsNormalized(value));
+                   Foreign::IsNormalized(value))
 ACCESSORS(AccessorInfo, js_getter, Object, kJsGetterOffset)
 ACCESSORS(AccessorInfo, data, Object, kDataOffset)
 
@@ -45,7 +46,7 @@ bool AccessorInfo::has_getter() {
   bool result = getter() != Smi::kZero;
   DCHECK_EQ(result,
             getter() != Smi::kZero &&
-                Foreign::cast(getter())->foreign_address() != kNullAddress);
+                Foreign::cast(getter()).foreign_address() != kNullAddress);
   return result;
 }
 
@@ -53,7 +54,7 @@ bool AccessorInfo::has_setter() {
   bool result = setter() != Smi::kZero;
   DCHECK_EQ(result,
             setter() != Smi::kZero &&
-                Foreign::cast(setter())->foreign_address() != kNullAddress);
+                Foreign::cast(setter()).foreign_address() != kNullAddress);
   return result;
 }
 
@@ -87,13 +88,13 @@ BIT_FIELD_ACCESSORS(AccessorInfo, flags, initial_property_attributes,
 
 bool AccessorInfo::IsCompatibleReceiver(Object receiver) {
   if (!HasExpectedReceiverType()) return true;
-  if (!receiver->IsJSObject()) return false;
+  if (!receiver.IsJSObject()) return false;
   return FunctionTemplateInfo::cast(expected_receiver_type())
-      ->IsTemplateFor(JSObject::cast(receiver)->map());
+      .IsTemplateFor(JSObject::cast(receiver).map());
 }
 
 bool AccessorInfo::HasExpectedReceiverType() {
-  return expected_receiver_type()->IsFunctionTemplateInfo();
+  return expected_receiver_type().IsFunctionTemplateInfo();
 }
 
 ACCESSORS(AccessCheckInfo, callback, Object, kCallbackOffset)

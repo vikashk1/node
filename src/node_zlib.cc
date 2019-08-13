@@ -19,11 +19,13 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+#include "memory_tracker-inl.h"
 #include "node.h"
 #include "node_buffer.h"
 
 #include "async_wrap-inl.h"
 #include "env-inl.h"
+#include "threadpoolwork-inl.h"
 #include "util-inl.h"
 
 #include "v8.h"
@@ -47,6 +49,7 @@ using v8::Context;
 using v8::Function;
 using v8::FunctionCallbackInfo;
 using v8::FunctionTemplate;
+using v8::Global;
 using v8::HandleScope;
 using v8::Int32;
 using v8::Integer;
@@ -526,7 +529,7 @@ class CompressionStream : public AsyncWrap, public ThreadPoolWork {
   bool closed_ = false;
   unsigned int refs_ = 0;
   uint32_t* write_result_ = nullptr;
-  Persistent<Function> write_js_callback_;
+  Global<Function> write_js_callback_;
   std::atomic<ssize_t> unreported_allocations_{0};
   size_t zlib_memory_ = 0;
 
@@ -1225,7 +1228,7 @@ struct MakeClass {
     z->SetClassName(zlibString);
     target->Set(env->context(),
                 zlibString,
-                z->GetFunction(env->context()).ToLocalChecked()).FromJust();
+                z->GetFunction(env->context()).ToLocalChecked()).Check();
   }
 };
 
@@ -1241,7 +1244,7 @@ void Initialize(Local<Object> target,
 
   target->Set(env->context(),
               FIXED_ONE_BYTE_STRING(env->isolate(), "ZLIB_VERSION"),
-              FIXED_ONE_BYTE_STRING(env->isolate(), ZLIB_VERSION)).FromJust();
+              FIXED_ONE_BYTE_STRING(env->isolate(), ZLIB_VERSION)).Check();
 }
 
 }  // anonymous namespace

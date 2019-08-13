@@ -1,5 +1,8 @@
+#include "diagnosticfilename-inl.h"
 #include "env-inl.h"
+#include "memory_tracker-inl.h"
 #include "stream_base-inl.h"
+#include "util-inl.h"
 
 using v8::Array;
 using v8::Boolean;
@@ -8,6 +11,7 @@ using v8::EmbedderGraph;
 using v8::EscapableHandleScope;
 using v8::FunctionCallbackInfo;
 using v8::FunctionTemplate;
+using v8::Global;
 using v8::HandleScope;
 using v8::HeapSnapshot;
 using v8::Isolate;
@@ -56,7 +60,7 @@ class JSGraphJSNode : public EmbedderGraph::Node {
   };
 
  private:
-  Persistent<Value> persistent_;
+  Global<Value> persistent_;
 };
 
 class JSGraph : public EmbedderGraph {
@@ -280,7 +284,6 @@ class HeapSnapshotStream : public AsyncWrap,
 
   int DoShutdown(ShutdownWrap* req_wrap) override {
     UNREACHABLE();
-    return 0;
   }
 
   int DoWrite(WriteWrap* w,
@@ -288,7 +291,6 @@ class HeapSnapshotStream : public AsyncWrap,
               size_t count,
               uv_stream_t* send_handle) override {
     UNREACHABLE();
-    return 0;
   }
 
   bool IsAlive() override { return snapshot_ != nullptr; }
@@ -396,7 +398,7 @@ void Initialize(Local<Object> target,
   Local<FunctionTemplate> os = FunctionTemplate::New(env->isolate());
   os->Inherit(AsyncWrap::GetConstructorTemplate(env));
   Local<ObjectTemplate> ost = os->InstanceTemplate();
-  ost->SetInternalFieldCount(StreamBase::kStreamBaseField + 1);
+  ost->SetInternalFieldCount(StreamBase::kStreamBaseFieldCount);
   os->SetClassName(FIXED_ONE_BYTE_STRING(env->isolate(), "HeapSnapshotStream"));
   StreamBase::AddMethods(env, os);
   env->set_streambaseoutputstream_constructor_template(ost);

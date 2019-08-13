@@ -7,8 +7,8 @@
 
 #include <functional>
 
-#include "src/handles.h"
-#include "src/simulator.h"
+#include "src/execution/simulator.h"
+#include "src/handles/handles.h"
 
 namespace v8 {
 namespace internal {
@@ -21,11 +21,11 @@ using F_ppiii = void*(void* p0, void* p1, int p2, int p3, int p4);
 using F_pppii = void*(void* p0, void* p1, void* p2, int p3, int p4);
 using F_ippii = void*(int p0, void* p1, void* p2, int p3, int p4);
 
-Handle<Code> AssembleCodeImpl(std::function<void(Assembler&)> assemble);
+Handle<Code> AssembleCodeImpl(std::function<void(MacroAssembler&)> assemble);
 
 template <typename Signature>
 GeneratedCode<Signature> AssembleCode(
-    std::function<void(Assembler&)> assemble) {
+    std::function<void(MacroAssembler&)> assemble) {
   return GeneratedCode<Signature>::FromCode(*AssembleCodeImpl(assemble));
 }
 

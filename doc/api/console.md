@@ -114,12 +114,12 @@ error output. If `stderr` is not provided, `stdout` is used for `stderr`.
 ```js
 const output = fs.createWriteStream('./stdout.log');
 const errorOutput = fs.createWriteStream('./stderr.log');
-// custom simple logger
+// Custom simple logger
 const logger = new Console({ stdout: output, stderr: errorOutput });
 // use it like console
 const count = 5;
 logger.log('count: %d', count);
-// in stdout.log: count 5
+// In stdout.log: count 5
 ```
 
 The global `console` is a special `Console` whose output is sent to
@@ -267,7 +267,7 @@ changes:
 * `...data` {any}
 
 This method calls `console.log()` passing it the arguments received.
-Please note that this method does not produce any XML formatting.
+This method does not produce any XML formatting.
 
 ### console.error([data][, ...args])
 <!-- YAML

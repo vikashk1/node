@@ -65,6 +65,7 @@ class V8InspectorSessionImpl : public V8InspectorSession,
   // V8InspectorSession implementation.
   void dispatchProtocolMessage(const StringView& message) override;
   std::unique_ptr<StringBuffer> stateJSON() override;
+  std::vector<uint8_t> state() override;
   std::vector<std::unique_ptr<protocol::Schema::API::Domain>> supportedDomains()
       override;
   void addInspectedObject(
@@ -102,7 +103,7 @@ class V8InspectorSessionImpl : public V8InspectorSession,
   void sendProtocolNotification(
       std::unique_ptr<protocol::Serializable> message) override;
   void fallThrough(int callId, const String16& method,
-                   const String16& message) override;
+                   const protocol::ProtocolMessage& message) override;
   void flushProtocolNotifications() override;
 
   int m_contextGroupId;
@@ -122,6 +123,7 @@ class V8InspectorSessionImpl : public V8InspectorSession,
   std::unique_ptr<V8SchemaAgentImpl> m_schemaAgent;
   std::vector<std::unique_ptr<V8InspectorSession::Inspectable>>
       m_inspectedObjects;
+  bool use_binary_protocol_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(V8InspectorSessionImpl);
 };

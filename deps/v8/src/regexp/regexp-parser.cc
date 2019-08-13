@@ -6,14 +6,15 @@
 
 #include <vector>
 
-#include "src/char-predicates-inl.h"
+#include "src/execution/isolate.h"
 #include "src/heap/factory.h"
-#include "src/isolate.h"
-#include "src/objects-inl.h"
-#include "src/ostreams.h"
+#include "src/objects/objects-inl.h"
 #include "src/regexp/jsregexp.h"
 #include "src/regexp/property-sequences.h"
-#include "src/utils.h"
+#include "src/strings/char-predicates-inl.h"
+#include "src/utils/ostreams.h"
+#include "src/utils/utils.h"
+#include "src/zone/zone-list-inl.h"
 
 #ifdef V8_INTL_SUPPORT
 #include "unicode/uniset.h"
@@ -76,7 +77,7 @@ void RegExpParser::Advance() {
   if (has_next()) {
     StackLimitCheck check(isolate());
     if (check.HasOverflowed()) {
-      if (FLAG_abort_on_stack_or_string_length_overflow) {
+      if (FLAG_correctness_fuzzer_suppressions) {
         FATAL("Aborting on stack overflow");
       }
       ReportError(CStrVector(
@@ -990,8 +991,12 @@ Handle<FixedArray> RegExpParser::CreateCaptureNameMap() {
 
   for (int i = 0; i < named_captures_->length(); i++) {
     RegExpCapture* capture = named_captures_->at(i);
-    MaybeHandle<String> name = factory->NewStringFromTwoByte(capture->name());
-    array->set(i * 2, *name.ToHandleChecked());
+    Vector<const uc16> capture_name(capture->name()->data(),
+                                    capture->name()->size());
+    // CSA code in ConstructNewResultFromMatchInfo requires these strings to be
+    // internalized so they can be used as property names in the 'exec' results.
+    Handle<String> name = factory->InternalizeString(capture_name);
+    array->set(i * 2, *name);
     array->set(i * 2 + 1, Smi::FromInt(capture->index()));
   }
 

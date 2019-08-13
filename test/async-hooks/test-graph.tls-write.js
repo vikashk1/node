@@ -20,8 +20,8 @@ hooks.enable();
 //
 const server = tls
   .createServer({
-    cert: fixtures.readSync('test_cert.pem'),
-    key: fixtures.readSync('test_key.pem')
+    cert: fixtures.readKey('rsa_cert.crt'),
+    key: fixtures.readKey('rsa_private.pem')
   })
   .on('listening', common.mustCall(onlistening))
   .on('secureConnection', common.mustCall(onsecureConnection))
@@ -64,12 +64,8 @@ function onexit() {
         id: 'getaddrinforeq:1', triggerAsyncId: 'tls:1' },
       { type: 'TCPCONNECTWRAP',
         id: 'tcpconnect:1', triggerAsyncId: 'tcp:1' },
-      { type: 'WRITEWRAP', id: 'write:1', triggerAsyncId: 'tcpconnect:1' },
       { type: 'TCPWRAP', id: 'tcp:2', triggerAsyncId: 'tcpserver:1' },
       { type: 'TLSWRAP', id: 'tls:2', triggerAsyncId: 'tcpserver:1' },
-      { type: 'WRITEWRAP', id: 'write:2', triggerAsyncId: null },
-      { type: 'WRITEWRAP', id: 'write:3', triggerAsyncId: null },
-      { type: 'WRITEWRAP', id: 'write:4', triggerAsyncId: null },
       { type: 'Immediate', id: 'immediate:1', triggerAsyncId: 'tcp:2' },
       { type: 'Immediate', id: 'immediate:2', triggerAsyncId: 'tcp:1' },
     ]

@@ -22,8 +22,6 @@ using v8::PropertyCallbackInfo;
 using v8::String;
 using v8::Value;
 
-using AsyncHooks = Environment::AsyncHooks;
-
 inline void StreamReq::AttachToObject(v8::Local<v8::Object> req_wrap_obj) {
   CHECK_EQ(req_wrap_obj->GetAlignedPointerFromInternalField(kStreamReqField),
            nullptr);
@@ -172,7 +170,7 @@ inline int StreamBase::Shutdown(v8::Local<v8::Object> req_wrap_obj) {
   if (msg != nullptr) {
     req_wrap_obj->Set(
         env->context(),
-        env->error_string(), OneByteString(env->isolate(), msg)).FromJust();
+        env->error_string(), OneByteString(env->isolate(), msg)).Check();
     ClearError();
   }
 
@@ -225,7 +223,7 @@ inline StreamWriteResult StreamBase::Write(
   if (msg != nullptr) {
     req_wrap_obj->Set(env->context(),
                       env->error_string(),
-                      OneByteString(env->isolate(), msg)).FromJust();
+                      OneByteString(env->isolate(), msg)).Check();
     ClearError();
   }
 
@@ -297,7 +295,7 @@ inline void StreamReq::Done(int status, const char* error_str) {
     async_wrap->object()->Set(env->context(),
                               env->error_string(),
                               OneByteString(env->isolate(), error_str))
-                              .FromJust();
+                              .Check();
   }
 
   OnDone(status);

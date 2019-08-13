@@ -5,9 +5,9 @@
 #ifndef V8_COMPILER_TYPER_H_
 #define V8_COMPILER_TYPER_H_
 
+#include "src/common/globals.h"
 #include "src/compiler/graph.h"
 #include "src/compiler/operation-typer.h"
-#include "src/globals.h"
 
 namespace v8 {
 namespace internal {
@@ -23,7 +23,7 @@ class V8_EXPORT_PRIVATE Typer {
     kThisIsReceiver = 1u << 0,       // Parameter this is an Object.
     kNewTargetIsReceiver = 1u << 1,  // Parameter new.target is an Object.
   };
-  typedef base::Flags<Flag> Flags;
+  using Flags = base::Flags<Flag>;
 
   Typer(JSHeapBroker* broker, Flags flags, Graph* graph);
   ~Typer();
@@ -56,7 +56,7 @@ class V8_EXPORT_PRIVATE Typer {
   DISALLOW_COPY_AND_ASSIGN(Typer);
 };
 
-DEFINE_OPERATORS_FOR_FLAGS(Typer::Flags);
+DEFINE_OPERATORS_FOR_FLAGS(Typer::Flags)
 
 }  // namespace compiler
 }  // namespace internal

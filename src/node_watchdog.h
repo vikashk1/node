@@ -49,7 +49,7 @@ class Watchdog {
 
   v8::Isolate* isolate_;
   uv_thread_t thread_;
-  uv_loop_t* loop_;
+  uv_loop_t loop_;
   uv_async_t async_;
   uv_timer_t timer_;
   bool* timed_out_;
@@ -99,7 +99,7 @@ class SigintWatchdogHelper {
   bool stopping_;
 
   static void* RunSigintWatchdog(void* arg);
-  static void HandleSignal(int signum);
+  static void HandleSignal(int signum, siginfo_t* info, void* ucontext);
 #else
   bool watchdog_disabled_;
   static BOOL WINAPI WinCtrlCHandlerRoutine(DWORD dwCtrlType);

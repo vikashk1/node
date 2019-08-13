@@ -7,27 +7,20 @@
 
 #include <vector>
 
-#include "src/allocation.h"
-#include "src/base/atomicops.h"
-#include "src/base/hashmap.h"
-#include "src/base/platform/platform.h"
+#include "src/codegen/source-position-table.h"
+#include "src/common/globals.h"
 #include "src/debug/debug-interface.h"
 #include "src/debug/interface-types.h"
-#include "src/execution.h"
-#include "src/flags.h"
-#include "src/frames.h"
-#include "src/globals.h"
-#include "src/heap/factory.h"
+#include "src/execution/frames.h"
+#include "src/execution/isolate.h"
+#include "src/handles/handles.h"
 #include "src/objects/debug-objects.h"
-#include "src/runtime/runtime.h"
-#include "src/source-position-table.h"
-#include "src/string-stream.h"
-#include "src/v8threads.h"
 
 namespace v8 {
 namespace internal {
 
 // Forward declarations.
+class AbstractCode;
 class DebugScope;
 class JSGeneratorObject;
 
@@ -128,7 +121,7 @@ class BreakLocation {
   friend class BreakIterator;
 };
 
-class BreakIterator {
+class V8_EXPORT_PRIVATE BreakIterator {
  public:
   explicit BreakIterator(Handle<DebugInfo> debug_info);
 
@@ -214,7 +207,7 @@ class DebugFeatureTracker {
 // active breakpoints in them. This debug info is held in the heap root object
 // debug_info which is a FixedArray. Each entry in this list is of class
 // DebugInfo.
-class Debug {
+class V8_EXPORT_PRIVATE Debug {
  public:
   // Debug event triggers.
   void OnDebugBreak(Handle<FixedArray> break_points_hit);
@@ -234,7 +227,7 @@ class Debug {
   Handle<FixedArray> GetLoadedScripts();
 
   // Break point handling.
-  bool SetBreakPoint(Handle<JSFunction> function,
+  bool SetBreakpoint(Handle<SharedFunctionInfo> shared,
                      Handle<BreakPoint> break_point, int* source_position);
   void ClearBreakPoint(Handle<BreakPoint> break_point);
   void ChangeBreakOnException(ExceptionBreakType type, bool enable);
@@ -242,7 +235,7 @@ class Debug {
 
   bool SetBreakPointForScript(Handle<Script> script, Handle<String> condition,
                               int* source_position, int* id);
-  bool SetBreakpointForFunction(Handle<JSFunction> function,
+  bool SetBreakpointForFunction(Handle<SharedFunctionInfo> shared,
                                 Handle<String> condition, int* id);
   void RemoveBreakpoint(int id);
 
@@ -268,6 +261,8 @@ class Debug {
   bool GetPossibleBreakpoints(Handle<Script> script, int start_position,
                               int end_position, bool restrict_to_function,
                               std::vector<BreakLocation>* locations);
+
+  MaybeHandle<JSArray> GetPrivateFields(Handle<JSReceiver> receiver);
 
   bool IsBlackboxed(Handle<SharedFunctionInfo> shared);
 
@@ -454,7 +449,7 @@ class Debug {
   void ClearAllDebuggerHints();
 
   // Wraps logic for clearing and maybe freeing all debug infos.
-  typedef std::function<void(Handle<DebugInfo>)> DebugInfoClearFunction;
+  using DebugInfoClearFunction = std::function<void(Handle<DebugInfo>)>;
   void ClearAllDebugInfos(const DebugInfoClearFunction& clear_function);
 
   void FindDebugInfo(Handle<DebugInfo> debug_info, DebugInfoListNode** prev,

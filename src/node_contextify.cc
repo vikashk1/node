@@ -21,12 +21,14 @@
 
 #include "node_contextify.h"
 
+#include "memory_tracker-inl.h"
 #include "node_internals.h"
 #include "node_watchdog.h"
 #include "base_object-inl.h"
 #include "node_context_data.h"
 #include "node_errors.h"
 #include "module_wrap.h"
+#include "util-inl.h"
 
 namespace node {
 namespace contextify {
@@ -60,9 +62,11 @@ using v8::PrimitiveArray;
 using v8::PropertyAttribute;
 using v8::PropertyCallbackInfo;
 using v8::PropertyDescriptor;
+using v8::PropertyHandlerFlags;
 using v8::Script;
 using v8::ScriptCompiler;
 using v8::ScriptOrigin;
+using v8::ScriptOrModule;
 using v8::String;
 using v8::Symbol;
 using v8::Uint32;
@@ -111,6 +115,19 @@ ContextifyContext::ContextifyContext(
 
   context_.Reset(env->isolate(), v8_context.ToLocalChecked());
   context_.SetWeak(this, WeakCallback, WeakCallbackType::kParameter);
+  env->AddCleanupHook(CleanupHook, this);
+}
+
+
+ContextifyContext::~ContextifyContext() {
+  env()->RemoveCleanupHook(CleanupHook, this);
+}
+
+
+void ContextifyContext::CleanupHook(void* arg) {
+  ContextifyContext* self = static_cast<ContextifyContext*>(arg);
+  self->context_.Reset();
+  delete self;
 }
 
 
@@ -148,13 +165,15 @@ MaybeLocal<Context> ContextifyContext::CreateV8Context(
   if (!CreateDataWrapper(env).ToLocal(&data_wrapper))
     return MaybeLocal<Context>();
 
-  NamedPropertyHandlerConfiguration config(PropertyGetterCallback,
-                                           PropertySetterCallback,
-                                           PropertyDescriptorCallback,
-                                           PropertyDeleterCallback,
-                                           PropertyEnumeratorCallback,
-                                           PropertyDefinerCallback,
-                                           data_wrapper);
+  NamedPropertyHandlerConfiguration config(
+      PropertyGetterCallback,
+      PropertySetterCallback,
+      PropertyDescriptorCallback,
+      PropertyDeleterCallback,
+      PropertyEnumeratorCallback,
+      PropertyDefinerCallback,
+      data_wrapper,
+      PropertyHandlerFlags::kHasNoSideEffect);
 
   IndexedPropertyHandlerConfiguration indexed_config(
       IndexedPropertyGetterCallback,
@@ -163,7 +182,8 @@ MaybeLocal<Context> ContextifyContext::CreateV8Context(
       IndexedPropertyDeleterCallback,
       PropertyEnumeratorCallback,
       IndexedPropertyDefinerCallback,
-      data_wrapper);
+      data_wrapper,
+      PropertyHandlerFlags::kHasNoSideEffect);
 
   object_template->SetHandler(config);
   object_template->SetHandler(indexed_config);
@@ -249,7 +269,7 @@ void ContextifyContext::MakeContext(const FunctionCallbackInfo<Value>& args) {
   options.allow_code_gen_wasm = args[4].As<Boolean>();
 
   TryCatchScope try_catch(env);
-  ContextifyContext* context = new ContextifyContext(env, sandbox, options);
+  auto context_ptr = std::make_unique<ContextifyContext>(env, sandbox, options);
 
   if (try_catch.HasCaught()) {
     if (!try_catch.HasTerminated())
@@ -257,13 +277,13 @@ void ContextifyContext::MakeContext(const FunctionCallbackInfo<Value>& args) {
     return;
   }
 
-  if (context->context().IsEmpty())
+  if (context_ptr->context().IsEmpty())
     return;
 
   sandbox->SetPrivate(
       env->context(),
       env->contextify_context_private_symbol(),
-      External::New(env->isolate(), context));
+      External::New(env->isolate(), context_ptr.release()));
 }
 
 
@@ -284,15 +304,6 @@ void ContextifyContext::WeakCallback(
     const WeakCallbackInfo<ContextifyContext>& data) {
   ContextifyContext* context = data.GetParameter();
   delete context;
-}
-
-void ContextifyContext::WeakCallbackCompileFn(
-    const WeakCallbackInfo<CompileFnEntry>& data) {
-  CompileFnEntry* entry = data.GetParameter();
-  if (entry->env->compile_fn_entries.erase(entry) != 0) {
-    entry->env->id_to_function_map.erase(entry->id);
-    delete entry;
-  }
 }
 
 // static
@@ -405,7 +416,7 @@ void ContextifyContext::PropertySetterCallback(
     args.GetReturnValue().Set(false);
   }
 
-  ctx->sandbox()->Set(ctx->context(), property, value).FromJust();
+  ctx->sandbox()->Set(ctx->context(), property, value).Check();
 }
 
 // static
@@ -469,7 +480,7 @@ void ContextifyContext::PropertyDefinerCallback(
         }
         // Set the property on the sandbox.
         sandbox->DefineProperty(context, property, *desc_for_sandbox)
-            .FromJust();
+            .Check();
       };
 
   if (desc.has_get() || desc.has_set()) {
@@ -620,7 +631,7 @@ void ContextifyScript::Init(Environment* env, Local<Object> target) {
   env->SetProtoMethod(script_tmpl, "runInThisContext", RunInThisContext);
 
   target->Set(env->context(), class_name,
-      script_tmpl->GetFunction(env->context()).ToLocalChecked()).FromJust();
+      script_tmpl->GetFunction(env->context()).ToLocalChecked()).Check();
   env->set_script_context_constructor_template(script_tmpl);
 }
 
@@ -719,7 +730,7 @@ void ContextifyScript::New(const FunctionCallbackInfo<Value>& args) {
     compile_options = ScriptCompiler::kConsumeCodeCache;
 
   TryCatchScope try_catch(env);
-  Environment::ShouldNotAbortOnUncaughtScope no_abort_scope(env);
+  ShouldNotAbortOnUncaughtScope no_abort_scope(env);
   Context::Scope scope(parsing_context);
 
   MaybeLocal<UnboundScript> v8_script = ScriptCompiler::CompileUnboundScript(
@@ -728,7 +739,7 @@ void ContextifyScript::New(const FunctionCallbackInfo<Value>& args) {
       compile_options);
 
   if (v8_script.IsEmpty()) {
-    DecorateErrorStack(env, try_catch);
+    errors::DecorateErrorStack(env, try_catch);
     no_abort_scope.Close();
     if (!try_catch.HasTerminated())
       try_catch.ReThrow();
@@ -744,7 +755,7 @@ void ContextifyScript::New(const FunctionCallbackInfo<Value>& args) {
     args.This()->Set(
         env->context(),
         env->cached_data_rejected_string(),
-        Boolean::New(isolate, source.GetCachedData()->rejected)).FromJust();
+        Boolean::New(isolate, source.GetCachedData()->rejected)).Check();
   } else if (produce_cached_data) {
     const ScriptCompiler::CachedData* cached_data =
       ScriptCompiler::CreateCodeCache(v8_script.ToLocalChecked());
@@ -756,12 +767,12 @@ void ContextifyScript::New(const FunctionCallbackInfo<Value>& args) {
           cached_data->length);
       args.This()->Set(env->context(),
                        env->cached_data_string(),
-                       buf.ToLocalChecked()).FromJust();
+                       buf.ToLocalChecked()).Check();
     }
     args.This()->Set(
         env->context(),
         env->cached_data_produced_string(),
-        Boolean::New(isolate, cached_data_produced)).FromJust();
+        Boolean::New(isolate, cached_data_produced)).Check();
   }
   TRACE_EVENT_NESTABLE_ASYNC_END0(
       TRACING_CATEGORY_NODE2(vm, script),
@@ -940,7 +951,7 @@ bool ContextifyScript::EvalMachine(Environment* env,
   if (try_catch.HasCaught()) {
     if (!timed_out && !received_signal && display_errors) {
       // We should decorate non-termination exceptions
-      DecorateErrorStack(env, try_catch);
+      errors::DecorateErrorStack(env, try_catch);
     }
 
     // If there was an exception thrown during script execution, re-throw it.
@@ -1098,25 +1109,35 @@ void ContextifyContext::CompileFunction(
     }
   }
 
+  Local<ScriptOrModule> script;
   MaybeLocal<Function> maybe_fn = ScriptCompiler::CompileFunctionInContext(
       parsing_context, &source, params.size(), params.data(),
-      context_extensions.size(), context_extensions.data(), options);
+      context_extensions.size(), context_extensions.data(), options,
+      v8::ScriptCompiler::NoCacheReason::kNoCacheNoReason, &script);
 
   if (maybe_fn.IsEmpty()) {
     if (try_catch.HasCaught() && !try_catch.HasTerminated()) {
-      DecorateErrorStack(env, try_catch);
+      errors::DecorateErrorStack(env, try_catch);
       try_catch.ReThrow();
     }
     return;
   }
   Local<Function> fn = maybe_fn.ToLocalChecked();
-  env->id_to_function_map.emplace(std::piecewise_construct,
-                                  std::make_tuple(id),
-                                  std::make_tuple(isolate, fn));
-  CompileFnEntry* gc_entry = new CompileFnEntry(env, id);
-  env->id_to_function_map[id].SetWeak(gc_entry,
-      WeakCallbackCompileFn,
-      v8::WeakCallbackType::kParameter);
+
+  Local<Object> cache_key;
+  if (!env->compiled_fn_entry_template()->NewInstance(
+           context).ToLocal(&cache_key)) {
+    return;
+  }
+  CompiledFnEntry* entry = new CompiledFnEntry(env, cache_key, id, script);
+  env->id_to_function_map.emplace(id, entry);
+
+  Local<Object> result = Object::New(isolate);
+  if (result->Set(parsing_context, env->function_string(), fn).IsNothing())
+    return;
+  if (result->Set(parsing_context, env->cache_key_string(), cache_key)
+          .IsNothing())
+    return;
 
   if (produce_cached_data) {
     const std::unique_ptr<ScriptCompiler::CachedData> cached_data(
@@ -1127,20 +1148,59 @@ void ContextifyContext::CompileFunction(
           env,
           reinterpret_cast<const char*>(cached_data->data),
           cached_data->length);
-      if (fn->Set(
-          parsing_context,
-          env->cached_data_string(),
-          buf.ToLocalChecked()).IsNothing()) return;
+      if (result
+              ->Set(parsing_context,
+                    env->cached_data_string(),
+                    buf.ToLocalChecked())
+              .IsNothing())
+        return;
     }
-    if (fn->Set(
-        parsing_context,
-        env->cached_data_produced_string(),
-        Boolean::New(isolate, cached_data_produced)).IsNothing()) return;
+    if (result
+            ->Set(parsing_context,
+                  env->cached_data_produced_string(),
+                  Boolean::New(isolate, cached_data_produced))
+            .IsNothing())
+      return;
   }
 
-  args.GetReturnValue().Set(fn);
+  args.GetReturnValue().Set(result);
 }
 
+void CompiledFnEntry::WeakCallback(
+    const WeakCallbackInfo<CompiledFnEntry>& data) {
+  CompiledFnEntry* entry = data.GetParameter();
+  delete entry;
+}
+
+CompiledFnEntry::CompiledFnEntry(Environment* env,
+                                 Local<Object> object,
+                                 uint32_t id,
+                                 Local<ScriptOrModule> script)
+    : BaseObject(env, object),
+      id_(id),
+      script_(env->isolate(), script) {
+  script_.SetWeak(this, WeakCallback, v8::WeakCallbackType::kParameter);
+}
+
+CompiledFnEntry::~CompiledFnEntry() {
+  env()->id_to_function_map.erase(id_);
+  script_.ClearWeak();
+}
+
+static void StartSigintWatchdog(const FunctionCallbackInfo<Value>& args) {
+  int ret = SigintWatchdogHelper::GetInstance()->Start();
+  args.GetReturnValue().Set(ret == 0);
+}
+
+static void StopSigintWatchdog(const FunctionCallbackInfo<Value>& args) {
+  bool had_pending_signals = SigintWatchdogHelper::GetInstance()->Stop();
+  args.GetReturnValue().Set(had_pending_signals);
+}
+
+static void WatchdogHasPendingSigint(const FunctionCallbackInfo<Value>& args) {
+  bool ret = SigintWatchdogHelper::GetInstance()->HasPendingSignal();
+  args.GetReturnValue().Set(ret);
+}
 
 void Initialize(Local<Object> target,
                 Local<Value> unused,
@@ -1149,6 +1209,20 @@ void Initialize(Local<Object> target,
   Environment* env = Environment::GetCurrent(context);
   ContextifyContext::Init(env, target);
   ContextifyScript::Init(env, target);
+
+  env->SetMethod(target, "startSigintWatchdog", StartSigintWatchdog);
+  env->SetMethod(target, "stopSigintWatchdog", StopSigintWatchdog);
+  // Used in tests.
+  env->SetMethodNoSideEffect(
+      target, "watchdogHasPendingSigint", WatchdogHasPendingSigint);
+
+  {
+    Local<FunctionTemplate> tpl = FunctionTemplate::New(env->isolate());
+    tpl->SetClassName(FIXED_ONE_BYTE_STRING(env->isolate(), "CompiledFnEntry"));
+    tpl->InstanceTemplate()->SetInternalFieldCount(1);
+
+    env->set_compiled_fn_entry_template(tpl->InstanceTemplate());
+  }
 }
 
 }  // namespace contextify

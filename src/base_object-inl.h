@@ -26,7 +26,7 @@
 
 #include "base_object.h"
 #include "env-inl.h"
-#include "util-inl.h"
+#include "util.h"
 #include "v8.h"
 
 namespace node {
@@ -40,9 +40,8 @@ BaseObject::BaseObject(Environment* env, v8::Local<v8::Object> object)
   env_->AddCleanupHook(DeleteMe, static_cast<void*>(this));
 }
 
-
 BaseObject::~BaseObject() {
-  env_->RemoveCleanupHook(DeleteMe, static_cast<void*>(this));
+  RemoveCleanupHook();
 
   if (persistent_handle_.IsEmpty()) {
     // This most likely happened because the weak callback below cleared it.
@@ -55,8 +54,11 @@ BaseObject::~BaseObject() {
   }
 }
 
+void BaseObject::RemoveCleanupHook() {
+  env_->RemoveCleanupHook(DeleteMe, static_cast<void*>(this));
+}
 
-Persistent<v8::Object>& BaseObject::persistent() {
+v8::Global<v8::Object>& BaseObject::persistent() {
   return persistent_handle_;
 }
 
@@ -121,6 +123,22 @@ BaseObject::MakeLazilyInitializedJSTemplate(Environment* env) {
   v8::Local<v8::FunctionTemplate> t = env->NewFunctionTemplate(constructor);
   t->InstanceTemplate()->SetInternalFieldCount(1);
   return t;
+}
+
+template <int Field>
+void BaseObject::InternalFieldGet(
+    v8::Local<v8::String> property,
+    const v8::PropertyCallbackInfo<v8::Value>& info) {
+  info.GetReturnValue().Set(info.This()->GetInternalField(Field));
+}
+
+template <int Field, bool (v8::Value::* typecheck)() const>
+void BaseObject::InternalFieldSet(v8::Local<v8::String> property,
+                                  v8::Local<v8::Value> value,
+                                  const v8::PropertyCallbackInfo<void>& info) {
+  // This could be e.g. value->IsFunction().
+  CHECK(((*value)->*typecheck)());
+  info.This()->SetInternalField(Field, value);
 }
 
 }  // namespace node

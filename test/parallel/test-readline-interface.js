@@ -25,7 +25,7 @@ const common = require('../common');
 
 const assert = require('assert');
 const readline = require('readline');
-const internalReadline = require('internal/readline');
+const internalReadline = require('internal/readline/utils');
 const EventEmitter = require('events').EventEmitter;
 const { Writable, Readable } = require('stream');
 
@@ -73,7 +73,7 @@ function isWarned(emitter) {
 }
 
 {
-  // set crlfDelay to 5000ms
+  // Set crlfDelay to 5000ms
   const fi = new FakeInput();
   const rli = new readline.Interface({
     input: fi,
@@ -98,7 +98,7 @@ function isWarned(emitter) {
     rli.close();
   }
 
-  // default history size 30
+  // Default history size 30
   {
     const fi = new FakeInput();
     const rli = new readline.Interface(
@@ -126,7 +126,7 @@ function isWarned(emitter) {
     assert.ok(called);
   }
 
-  // sending a blank line
+  // Sending a blank line
   {
     const fi = new FakeInput();
     const rli = new readline.Interface(
@@ -366,6 +366,26 @@ function isWarned(emitter) {
       type: TypeError,
       code: 'ERR_INVALID_OPT_VALUE'
     });
+
+    common.expectsError(function() {
+      readline.createInterface({
+        input: fi,
+        completer: ''
+      });
+    }, {
+      type: TypeError,
+      code: 'ERR_INVALID_OPT_VALUE'
+    });
+
+    common.expectsError(function() {
+      readline.createInterface({
+        input: fi,
+        completer: false
+      });
+    }, {
+      type: TypeError,
+      code: 'ERR_INVALID_OPT_VALUE'
+    });
   }
 
   // Constructor throws if historySize is not a positive number
@@ -531,7 +551,7 @@ function isWarned(emitter) {
     rli.close();
   }
 
-  // calling the question callback
+  // Calling the question callback
   {
     let called = false;
     const fi = new FakeInput();
@@ -576,7 +596,7 @@ function isWarned(emitter) {
       rli.close();
     }
 
-    // sending a multi-line question
+    // Sending a multi-line question
     {
       const fi = new FakeInput();
       const rli = new readline.Interface(
@@ -1042,7 +1062,7 @@ function isWarned(emitter) {
       rli.close();
     }
 
-    // multi-line cursor position
+    // Multi-line input cursor position
     {
       const fi = new FakeInput();
       const rli = new readline.Interface({
@@ -1056,6 +1076,23 @@ function isWarned(emitter) {
       const cursorPos = rli._getCursorPos();
       assert.strictEqual(cursorPos.rows, 1);
       assert.strictEqual(cursorPos.cols, 5);
+      rli.close();
+    }
+
+    // Multi-line prompt cursor position
+    {
+      const fi = new FakeInput();
+      const rli = new readline.Interface({
+        input: fi,
+        output: fi,
+        prompt: '\nfilledline\nwraping text\n> ',
+        terminal: terminal
+      });
+      fi.columns = 10;
+      fi.emit('data', 't');
+      const cursorPos = rli._getCursorPos();
+      assert.strictEqual(cursorPos.rows, 4);
+      assert.strictEqual(cursorPos.cols, 3);
       rli.close();
     }
 
@@ -1272,3 +1309,26 @@ const crlfDelay = Infinity;
     }), delay);
   }
 });
+
+// Ensure that the _wordLeft method works even for large input
+{
+  const input = new Readable({
+    read() {
+      this.push('\x1B[1;5D'); // CTRL + Left
+      this.push(null);
+    },
+  });
+  const output = new Writable({
+    write: common.mustCall((data, encoding, cb) => {
+      assert.strictEqual(rl.cursor, rl.line.length - 1);
+      cb();
+    }),
+  });
+  const rl = new readline.createInterface({
+    input: input,
+    output: output,
+    terminal: true,
+  });
+  rl.line = `a${' '.repeat(1e6)}a`;
+  rl.cursor = rl.line.length;
+}

@@ -4,7 +4,7 @@
 #if defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS
 
 #include "async_wrap.h"
-#include "env-inl.h"
+#include "env.h"
 
 #include <sstream>
 #include <string>
@@ -100,7 +100,7 @@ class NativeSymbolDebuggingContext {
   };
 
   NativeSymbolDebuggingContext() = default;
-  virtual ~NativeSymbolDebuggingContext() {}
+  virtual ~NativeSymbolDebuggingContext() = default;
 
   virtual SymbolInfo LookupSymbol(void* address) { return {}; }
   virtual bool IsMapped(void* address) { return false; }
